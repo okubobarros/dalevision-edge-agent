@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 109, in <module>
+    main()
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 105, in main
+    run_agent(settings, heartbeat_only=args.heartbeat_only)
+  File "C:\workspace\dale-vision\edge-agent\src\agent\lifecycle.py", line 214, in run_agent
+    from ..camera.rtsp import RtspCameraWorker
+  File "C:\workspace\dale-vision\edge-agent\src\camera\rtsp.py", line 8, in <module>
+    import cv2
+ModuleNotFoundError: No module named 'cv2'
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log

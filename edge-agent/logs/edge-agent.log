@@ -1,0 +1,208 @@
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+using X-EDGE-TOKEN
+ℹ️ heartbeat-only mode enabled (vision disabled)
+Exception in thread Thread-1 (_run_setup_server):
+Traceback (most recent call last):
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 560, in configure
+    formatters[name] = self.configure_formatter(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 672, in configure_formatter
+    result = self.configure_custom(config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 490, in configure_custom
+    result = c(**kwargs)
+             ^^^^^^^^^^^
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\logging.py", line 42, in __init__
+    self.use_colors = sys.stdout.isatty()
+                      ^^^^^^^^^^^^^^^^^
+AttributeError: '_Tee' object has no attribute 'isatty'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Program Files\Python312\Lib\threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "C:\Program Files\Python312\Lib\threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 71, in _run_setup_server
+    config = uvicorn.Config(
+             ^^^^^^^^^^^^^^^
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\config.py", line 278, in __init__
+    self.configure_logging()
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\config.py", line 370, in configure_logging
+    logging.config.dictConfig(self.log_config)
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 914, in dictConfig
+    dictConfigClass(config).configure()
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 563, in configure
+    raise ValueError('Unable to configure '
+ValueError: Unable to configure formatter 'default'
+🌐 flush sent=0 failed=4 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=11 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🛑 shutdown requested (KeyboardInterrupt)
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+using X-EDGE-TOKEN
+ℹ️ heartbeat-only mode enabled (vision disabled)
+Exception in thread Thread-1 (_run_setup_server):
+Traceback (most recent call last):
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 560, in configure
+    formatters[name] = self.configure_formatter(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 672, in configure_formatter
+    result = self.configure_custom(config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 490, in configure_custom
+    result = c(**kwargs)
+             ^^^^^^^^^^^
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\logging.py", line 42, in __init__
+    self.use_colors = sys.stdout.isatty()
+                      ^^^^^^^^^^^^^^^^^
+AttributeError: '_Tee' object has no attribute 'isatty'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Program Files\Python312\Lib\threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "C:\Program Files\Python312\Lib\threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 71, in _run_setup_server
+    config = uvicorn.Config(
+             ^^^^^^^^^^^^^^^
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\config.py", line 278, in __init__
+    self.configure_logging()
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\config.py", line 370, in configure_logging
+    logging.config.dictConfig(self.log_config)
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 914, in dictConfig
+    dictConfigClass(config).configure()
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 563, in configure
+    raise ValueError('Unable to configure '
+ValueError: Unable to configure formatter 'default'
+🌐 flush sent=13 failed=4 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Read timed out. (read timeout=8)
+🛑 shutdown requested (KeyboardInterrupt)
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+using X-EDGE-TOKEN
+ℹ️ heartbeat-only mode enabled (vision disabled)
+Exception in thread Thread-1 (_run_setup_server):
+Traceback (most recent call last):
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 560, in configure
+    formatters[name] = self.configure_formatter(
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 672, in configure_formatter
+    result = self.configure_custom(config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 490, in configure_custom
+    result = c(**kwargs)
+             ^^^^^^^^^^^
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\logging.py", line 42, in __init__
+    self.use_colors = sys.stdout.isatty()
+                      ^^^^^^^^^^^^^^^^^
+AttributeError: '_Tee' object has no attribute 'isatty'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Program Files\Python312\Lib\threading.py", line 1073, in _bootstrap_inner
+    self.run()
+  File "C:\Program Files\Python312\Lib\threading.py", line 1010, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 71, in _run_setup_server
+    config = uvicorn.Config(
+             ^^^^^^^^^^^^^^^
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\config.py", line 278, in __init__
+    self.configure_logging()
+  File "C:\workspace\dale-vision\edge-agent\venv\Lib\site-packages\uvicorn\config.py", line 370, in configure_logging
+    logging.config.dictConfig(self.log_config)
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 914, in dictConfig
+    dictConfigClass(config).configure()
+  File "C:\Program Files\Python312\Lib\logging\config.py", line 563, in configure
+    raise ValueError('Unable to configure '
+ValueError: Unable to configure formatter 'default'
+🌐 flush sent=0 failed=39 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🌐 flush sent=0 failed=50 last_error=HTTPConnectionPool(host='127.0.0.1', port=8000): Max retries exceeded with url: /api/edge/events/ (Caused by NewConnectionError("HTTPConnection(host='127.0.0.1', port=8000): Failed to establish a new connection: [WinError 10061] Nenhuma conexão pôde ser feita porque a máquina de destino as recusou ativamente"))
+🛑 shutdown requested (KeyboardInterrupt)
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+using X-EDGE-TOKEN
+ℹ️ heartbeat-only mode enabled (vision disabled)
+🌐 flush sent=0 failed=50 last_error={"detail":"Edge token inválido."}
+⚠️ python-multipart not installed; /roi/upload disabled
+INFO:     Started server process [8724]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:7860 (Press CTRL+C to quit)
+🌐 flush sent=0 failed=50 last_error={"detail":"Edge token inválido."}
+🌐 flush sent=0 failed=50 last_error={"detail":"Edge token inválido."}
+🌐 flush sent=0 failed=50 last_error={"detail":"Edge token inválido."}
+🛑 shutdown requested (KeyboardInterrupt)
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+using X-EDGE-TOKEN
+ℹ️ heartbeat-only mode enabled (vision disabled)
+🌐 flush sent=0 failed=50 last_error={"detail":"Edge token inválido."}
+⚠️ python-multipart not installed; /roi/upload disabled
+INFO:     Started server process [24820]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:7860 (Press CTRL+C to quit)
+🛑 shutdown requested (KeyboardInterrupt)
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+using X-EDGE-TOKEN
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 109, in <module>
+    main()
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 105, in main
+    run_agent(settings, heartbeat_only=args.heartbeat_only)
+  File "C:\workspace\dale-vision\edge-agent\src\agent\lifecycle.py", line 127, in run_agent
+    from ..vision.detector import PersonDetector
+  File "C:\workspace\dale-vision\edge-agent\src\vision\detector.py", line 7, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+ℹ️ heartbeat-only mode enabled (vision disabled)
+⚠️ python-multipart not installed; /roi/upload disabled
+INFO:     Started server process [25544]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:7860 (Press CTRL+C to quit)
+🌐 send failed status=None err=connection_error
+🌐 flush failed status=None err=connection_error
+🌐 send failed status=None err=connection_error
+🌐 flush failed status=None err=connection_error
+🌐 send failed status=None err=connection_error
+🌐 flush failed status=None err=connection_error
+🌐 send failed status=None err=connection_error
+🌐 flush failed status=None err=connection_error
+[DALE Vision] logging to C:\workspace\dale-vision\edge-agent\logs\edge-agent.log
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 109, in <module>
+    main()
+  File "C:\workspace\dale-vision\edge-agent\src\agent\main.py", line 105, in main
+    run_agent(settings, heartbeat_only=args.heartbeat_only)
+  File "C:\workspace\dale-vision\edge-agent\src\agent\lifecycle.py", line 214, in run_agent
+    from ..camera.rtsp import RtspCameraWorker
+  File "C:\workspace\dale-vision\edge-agent\src\camera\rtsp.py", line 8, in <module>
+    import cv2
+ModuleNotFoundError: No module named 'cv2'
+🛑 shutdown requested (KeyboardInterrupt)

@@ -1,0 +1,7 @@
+zones: {}
+lines:
+  linha_entrada_saida:
+  - - 682
+    - 216
+  - - 666
+    - 355
