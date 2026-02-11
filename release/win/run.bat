@@ -17,6 +17,7 @@ if not exist ".env" (
 )
 
 echo Iniciando agente...
+echo Logs: %CD%\logs\agent.log
 echo (Se der erro, copie o log do terminal e envie ao suporte)
 echo.
 
