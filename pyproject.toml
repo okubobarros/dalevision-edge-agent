@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dalevision-edge-agent"
+version = "0.1.0"
+description = "DALE Vision Edge Agent"
+requires-python = ">=3.10"
+dependencies = [
+  "requests>=2.31.0",
+  "python-dotenv>=1.0.1",
+  "pydantic>=2.6.0",
+  "pyyaml>=6.0.1",
+]
+
+[project.scripts]
+dalevision-edge-agent = "dalevision_edge_agent.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
