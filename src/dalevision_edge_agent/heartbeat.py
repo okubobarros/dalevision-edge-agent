@@ -31,7 +31,12 @@ def send_heartbeat(
             "version": version,
         },
     }
-    headers = {"X-EDGE-TOKEN": edge_token}
+
+    token = (edge_token or "").strip()
+    headers = {
+        "X-EDGE-TOKEN": token,
+        "Content-Type": "application/json",
+    }
 
     try:
         response = requests.post(
@@ -42,7 +47,18 @@ def send_heartbeat(
         )
         status = response.status_code
         ok = 200 <= status < 300
-        error = None if ok else f"HTTP {status}"
-        return ok, status, error
+
+        if status >= 400:
+            body = (response.text or "").strip()
+            if len(body) > 600:
+                body = body[:600]
+            error = f"HTTP {status}: {body}" if body else f"HTTP {status}"
+            return False, status, error
+
+        if ok:
+            return True, status, None
+
+        return False, status, f"HTTP {status}"
+
     except requests.RequestException as exc:
         return False, None, str(exc)
