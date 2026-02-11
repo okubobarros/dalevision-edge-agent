@@ -5,24 +5,19 @@ cd /d %~dp0
 echo ===============================
 echo DALE Vision Edge Agent (Windows)
 echo ===============================
-echo.
 
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado nesta pasta.
   echo - Cole o .env gerado no Wizard aqui, ao lado deste run.bat
   echo - Exemplo: renomeie .env.example para .env e preencha
-  echo.
   pause
   exit /b 1
 )
 
 echo Iniciando agente...
-echo Logs: %CD%\logs\agent.log
-echo (Se der erro, copie o log do terminal e envie ao suporte)
-echo.
+echo (Se der erro, envie o arquivo agent.log)
+dalevision-edge-agent.exe > agent.log 2>&1
 
-dalevision-edge-agent.exe
-
-echo.
-echo O agente encerrou. Pressione qualquer tecla para fechar.
-pause >nul
+echo ---
+echo Agente finalizou. Veja agent.log
+pause
