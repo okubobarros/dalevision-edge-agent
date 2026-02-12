@@ -9,8 +9,8 @@ echo.
 
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado nesta pasta.
-  echo 1) Renomeie .env.example para .env
-  echo 2) Abra .env e cole o conteudo gerado no Wizard (Copiar .env)
+  echo 1) Abra o arquivo .env nesta pasta
+  echo 2) Cole o conteudo gerado no Wizard (Copiar .env) e salve
   echo 3) Rode novamente run.bat
   echo.
   pause
