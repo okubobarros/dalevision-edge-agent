@@ -12,21 +12,6 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _format_error(status: int, response_text: str) -> str:
-    # tenta extrair {"detail": "..."} quando existir
-    try:
-        data = requests.models.complexjson.loads(response_text)  # type: ignore[attr-defined]
-        if isinstance(data, dict) and "detail" in data:
-            return f"HTTP {status}: {data['detail']}"
-    except Exception:
-        pass
-
-    snippet = (response_text or "").strip().replace("\n", " ")
-    if len(snippet) > 200:
-        snippet = snippet[:200] + "..."
-    return f"HTTP {status}: {snippet or 'Erro sem corpo'}"
-
-
 def send_heartbeat(
     *,
     url: str,
@@ -57,7 +42,22 @@ def send_heartbeat(
         )
         status = response.status_code
         ok = 200 <= status < 300
-        error = None if ok else _format_error(status, response.text)
-        return ok, status, error
+
+        if ok:
+            return True, status, None
+
+        # tenta extrair body (muito útil p/ 403 Edge token inválido etc.)
+        body = None
+        try:
+            body = response.text
+        except Exception:
+            body = None
+
+        msg = f"HTTP {status}"
+        if body:
+            msg = f"{msg}: {body}"
+
+        return False, status, msg
+
     except requests.RequestException as exc:
         return False, None, str(exc)
