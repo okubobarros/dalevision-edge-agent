@@ -51,6 +51,6 @@ Remove-Item .\$zipName -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path .\release\win\* -DestinationPath .\$zipName
 
 # 7) sanity check
-python -c "import zipfile; z=zipfile.ZipFile('$zipName'); names=[i.filename for i in z.infolist()]; required={'dalevision-edge-agent.exe','run.bat','README.txt','.env'}; missing=required-set(names); assert not missing, f'Missing {missing}'; assert '.env.example' not in names, 'Found .env.example in ZIP'; print('ZIP_OK files=', names)"
+python -c "import zipfile; z=zipfile.ZipFile('$zipName'); names=[i.filename for i in z.infolist()]; required={'dalevision-edge-agent.exe','run.bat','README.txt','.env'}; missing=required-set(names); unexpected=set(names)-required; assert not missing, f'Missing {missing}'; assert not unexpected, f'Unexpected files in ZIP: {unexpected}'; assert '.env.example' not in names, 'Found .env.example in ZIP'; print('ZIP_OK files=', names)"
 
 Write-Host "OK -> $zipName (ready for GitHub Release $Version)"
