@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import os
 from pathlib import Path
 
@@ -71,6 +72,17 @@ def load_settings() -> Settings:
 
     if missing:
         raise ValueError("Missing required env vars: " + ", ".join(missing))
+
+    logger = logging.getLogger("dalevision-edge-agent")
+    token = values["EDGE_TOKEN"].strip()
+    values["EDGE_TOKEN"] = token
+    if token:
+        logger.info("EDGE_TOKEN diagnostics len=%s prefix=%s", len(token), token[:6])
+        if len(token) < 20:
+            logger.error(
+                "EDGE_TOKEN inválido (muito curto). Refaça o .env copiando do Wizard."
+            )
+            raise ValueError("EDGE_TOKEN inválido (muito curto).")
 
     heartbeat_interval = _parse_int_env(
         "HEARTBEAT_INTERVAL_SECONDS",
