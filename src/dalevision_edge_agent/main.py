@@ -6,7 +6,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import time
 
-from .env import load_env_from_cwd, load_settings
+from .env import InvalidTokenError, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 
 BACKOFF_SECONDS = [2, 5, 10, 20, 30]
@@ -51,6 +51,11 @@ def main() -> int:
 
     try:
         settings = load_settings()
+    except InvalidTokenError as exc:
+        message = f"ERRO: {exc}"
+        print(message)
+        logger.error(message)
+        return 2
     except ValueError as exc:
         message = f"ERRO: {exc}"
         print(message)
