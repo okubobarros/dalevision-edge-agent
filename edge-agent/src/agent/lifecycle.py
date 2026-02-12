@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import base64
 import time
 import threading
 import queue as mem_queue
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..events.builder import build_envelope
 from ..events.receipts import compute_receipt_id
 from ..queue.sqlite_queue import SqliteQueue
 from ..transport.api_client import ApiClient
 from .runtime_state import RUNTIME_STATE
+
+SNAPSHOT_INTERVAL_SECONDS = 60
 
 
 @dataclass
@@ -33,6 +36,7 @@ def _make_heartbeat_envelope(
     external_id: Optional[str] = None,
     name: Optional[str] = None,
     rtsp_url: Optional[str] = None,
+    snapshot_url: Optional[str] = None,
     status: str = "online",
     error: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -42,6 +46,7 @@ def _make_heartbeat_envelope(
         "external_id": external_id or camera_id,
         "name": name,
         "rtsp_url": rtsp_url,
+        "snapshot_url": snapshot_url,
         "status": status,
         "error": error,
         "agent_id": settings.agent_id,
@@ -63,11 +68,28 @@ def _make_heartbeat_envelope(
     return envelope
 
 
+def _encode_snapshot_data_url(image: Any) -> Optional[str]:
+    """Encodes a frame as compact JPEG data URL for lightweight heartbeat previews."""
+    try:
+        import cv2
+    except Exception:
+        return None
+    try:
+        ok, buf = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+        if not ok:
+            return None
+        b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+        return f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        return None
+
+
 def _heartbeat_loop(
     *,
     settings,
     pending_queue: mem_queue.Queue,
     cameras: List[Any],
+    snapshot_provider: Optional[Callable[[str], Optional[str]]],
     stop_event: threading.Event,
 ) -> None:
     interval = max(5, int(getattr(settings, "heartbeat_interval_seconds", 30) or 30))
@@ -92,13 +114,22 @@ def _heartbeat_loop(
                 if not cam_ok:
                     cam_err = cam_err or getattr(cam, "last_error", None)
 
+                camera_id = getattr(cam, "camera_id", None)
+                snapshot_url = None
+                if snapshot_provider is not None and camera_id:
+                    try:
+                        snapshot_url = snapshot_provider(camera_id)
+                    except Exception:
+                        snapshot_url = None
+
                 pending_queue.put(
                     _make_heartbeat_envelope(
                         settings=settings,
-                        camera_id=getattr(cam, "camera_id", None),
-                        external_id=getattr(cam, "camera_id", None),
+                        camera_id=camera_id,
+                        external_id=camera_id,
                         name=getattr(cam, "name", None),
                         rtsp_url=getattr(cam, "rtsp_url", None),
+                        snapshot_url=snapshot_url,
                         status="online" if cam_ok else "error",
                         error=cam_err,
                     )
@@ -209,6 +240,14 @@ def run_agent(settings, heartbeat_only: bool = False) -> None:
     detector = None
     aggregator = None
     rules = None
+    snapshot_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _snapshot_provider(camera_id: str) -> Optional[str]:
+        info = snapshot_cache.get(camera_id) or {}
+        url = info.get("url")
+        if isinstance(url, str) and url:
+            return url
+        return None
 
     if not heartbeat_only and settings.vision_enabled:
         from ..camera.rtsp import RtspCameraWorker
@@ -280,7 +319,13 @@ def run_agent(settings, heartbeat_only: bool = False) -> None:
 
     hb_thread = threading.Thread(
         target=_heartbeat_loop,
-        kwargs=dict(settings=settings, pending_queue=pending_queue, cameras=cameras, stop_event=stop_event),
+        kwargs=dict(
+            settings=settings,
+            pending_queue=pending_queue,
+            cameras=cameras,
+            snapshot_provider=_snapshot_provider,
+            stop_event=stop_event,
+        ),
         daemon=True,
     )
     hb_thread.start()
@@ -295,6 +340,14 @@ def run_agent(settings, heartbeat_only: bool = False) -> None:
 
                     dets = detector.detect(f.image)
                     metrics = w.update_metrics(dets, f.ts)
+
+                    now_ts = time.time()
+                    snap_entry = snapshot_cache.get(w.camera_id) or {}
+                    last_snap_at = float(snap_entry.get("ts") or 0.0)
+                    if (now_ts - last_snap_at) >= SNAPSHOT_INTERVAL_SECONDS:
+                        snap_url = _encode_snapshot_data_url(f.image)
+                        if snap_url:
+                            snapshot_cache[w.camera_id] = {"ts": now_ts, "url": snap_url}
 
                     aggregator.add_sample(
                         camera_id=w.camera_id,
