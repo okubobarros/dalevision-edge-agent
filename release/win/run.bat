@@ -15,9 +15,11 @@ if not exist ".env" (
 )
 
 echo Iniciando agente...
-echo (Se der erro, envie o arquivo agent.log)
-dalevision-edge-agent.exe > agent.log 2>&1
+echo Logs: %CD%\logs\agent.log
+echo (Se der erro, veja stdout.log)
+
+dalevision-edge-agent.exe > stdout.log 2>&1
 
 echo ---
-echo Agente finalizou. Veja agent.log
+echo Agente finalizou. Abra stdout.log e logs\agent.log
 pause

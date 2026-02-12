@@ -12,6 +12,21 @@ def _utc_timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _format_error(status: int, response_text: str) -> str:
+    # tenta extrair {"detail": "..."} quando existir
+    try:
+        data = requests.models.complexjson.loads(response_text)  # type: ignore[attr-defined]
+        if isinstance(data, dict) and "detail" in data:
+            return f"HTTP {status}: {data['detail']}"
+    except Exception:
+        pass
+
+    snippet = (response_text or "").strip().replace("\n", " ")
+    if len(snippet) > 200:
+        snippet = snippet[:200] + "..."
+    return f"HTTP {status}: {snippet or 'Erro sem corpo'}"
+
+
 def send_heartbeat(
     *,
     url: str,
@@ -31,12 +46,7 @@ def send_heartbeat(
             "version": version,
         },
     }
-
-    token = (edge_token or "").strip()
-    headers = {
-        "X-EDGE-TOKEN": token,
-        "Content-Type": "application/json",
-    }
+    headers = {"X-EDGE-TOKEN": edge_token}
 
     try:
         response = requests.post(
@@ -47,18 +57,7 @@ def send_heartbeat(
         )
         status = response.status_code
         ok = 200 <= status < 300
-
-        if status >= 400:
-            body = (response.text or "").strip()
-            if len(body) > 600:
-                body = body[:600]
-            error = f"HTTP {status}: {body}" if body else f"HTTP {status}"
-            return False, status, error
-
-        if ok:
-            return True, status, None
-
-        return False, status, f"HTTP {status}"
-
+        error = None if ok else _format_error(status, response.text)
+        return ok, status, error
     except requests.RequestException as exc:
         return False, None, str(exc)
