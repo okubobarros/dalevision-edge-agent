@@ -46,18 +46,14 @@ def send_heartbeat(
         if ok:
             return True, status, None
 
-        # tenta extrair body (muito útil p/ 403 Edge token inválido etc.)
-        body = None
+        # tenta extrair erro do backend, senão cai no texto bruto
+        detail = None
         try:
-            body = response.text
+            j = response.json()
+            detail = j.get("detail") or j.get("error") or j
         except Exception:
-            body = None
+            detail = response.text.strip()[:500] if response.text else None
 
-        msg = f"HTTP {status}"
-        if body:
-            msg = f"{msg}: {body}"
-
-        return False, status, msg
-
+        return False, status, f"HTTP {status}: {detail}"
     except requests.RequestException as exc:
         return False, None, str(exc)
