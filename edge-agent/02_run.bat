@@ -23,6 +23,30 @@ if exist "venv\Scripts\python.exe" (
 )
 
 echo [DALE Vision] Starting Edge Agent (run)...
-%PY% -m src.agent.main --config .\config\agent.yaml %*
+set "MODE_ARGS="
+set "HAS_HEARTBEAT_ONLY=0"
+for %%A in (%*) do (
+  if /I "%%~A"=="--heartbeat-only" set "HAS_HEARTBEAT_ONLY=1"
+)
+if "%HAS_HEARTBEAT_ONLY%"=="0" (
+  set "MODE_ARGS=--heartbeat-only"
+  echo [DALE Vision] Mode: heartbeat-only (default).
+)
+
+%PY% -m src.agent.main --config .\config\agent.yaml %MODE_ARGS% %*
+set "EXIT_CODE=%ERRORLEVEL%"
+
+if not "%EXIT_CODE%"=="0" (
+  echo.
+  echo [DALE Vision] Agent stopped with exit code %EXIT_CODE%.
+  echo Check logs\edge-agent.log and logs\task.err.log for details.
+  pause
+  endlocal
+  exit /b %EXIT_CODE%
+)
+
+echo.
+echo [DALE Vision] Agent exited normally.
+pause
 
 endlocal

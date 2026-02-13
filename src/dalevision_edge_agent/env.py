@@ -5,6 +5,8 @@ import io
 import logging
 import os
 from pathlib import Path
+import re
+import socket
 
 from dotenv import dotenv_values
 
@@ -12,6 +14,8 @@ REQUIRED_ENV = {
     "CLOUD_BASE_URL": ["DALE_CLOUD_BASE_URL"],
     "STORE_ID": ["DALE_STORE_ID"],
     "EDGE_TOKEN": ["DALE_EDGE_TOKEN"],
+}
+OPTIONAL_ENV = {
     "AGENT_ID": ["DALE_AGENT_ID"],
 }
 
@@ -31,6 +35,22 @@ class Settings:
 
 class InvalidTokenError(ValueError):
     pass
+
+
+def _sanitize_agent_id(value: str) -> str:
+    cleaned = (value or "").strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", cleaned)
+    cleaned = cleaned.strip("-._")
+    return cleaned[:64]
+
+
+def _default_agent_id(store_id: str) -> str:
+    host = os.getenv("COMPUTERNAME") or socket.gethostname() or "host"
+    host = _sanitize_agent_id(host.lower()) or "host"
+    suffix = _sanitize_agent_id(store_id)[:8] or "store"
+    return f"edge-{host}-{suffix}"[:64]
 
 
 def _read_env_text(env_path: Path) -> str:
@@ -114,6 +134,18 @@ def load_settings() -> Settings:
         raise ValueError("Missing required env vars: " + ", ".join(missing))
 
     logger = logging.getLogger("dalevision-edge-agent")
+
+    agent_id = _sanitize_agent_id(
+        _get_env_value("AGENT_ID", OPTIONAL_ENV["AGENT_ID"], strip=True)
+    )
+    if not agent_id:
+        agent_id = _default_agent_id(values["STORE_ID"])
+        logger.warning(
+            "AGENT_ID ausente no .env; usando fallback seguro: %s",
+            agent_id,
+        )
+    values["AGENT_ID"] = agent_id
+
     token = _normalize_token(values["EDGE_TOKEN"])
     values["EDGE_TOKEN"] = token
     prefix = token[:6]
@@ -125,11 +157,14 @@ def load_settings() -> Settings:
         suffix,
     )
 
+    if not token:
+        logger.error("EDGE_TOKEN vazio. Refaça o .env copiando do Wizard.")
+        raise InvalidTokenError("EDGE_TOKEN vazio.")
     if len(token) < 20:
-        logger.error(
-            "EDGE_TOKEN inválido (muito curto). Refaça o .env copiando do Wizard."
+        logger.warning(
+            "EDGE_TOKEN com tamanho incomum (%s). O backend validará a credencial.",
+            len(token),
         )
-        raise InvalidTokenError("EDGE_TOKEN inválido (muito curto).")
 
     heartbeat_interval = _parse_int_env(
         "HEARTBEAT_INTERVAL_SECONDS",
