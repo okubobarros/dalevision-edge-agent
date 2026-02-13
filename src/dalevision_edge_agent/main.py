@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib.metadata
 import logging
 from logging.handlers import RotatingFileHandler
@@ -13,7 +14,10 @@ BACKOFF_SECONDS = [2, 5, 10, 20, 30]
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 AUTH_FAILURE_STATUSES = {401, 403}
-MAX_CONSECUTIVE_AUTH_FAILURES = 3
+MAX_CONSECUTIVE_FAILURES = 10
+EXIT_CONFIG_ERROR = 2
+EXIT_AUTH_ERROR = 3
+EXIT_NETWORK_ERROR = 4
 
 
 def _setup_logging() -> logging.Logger:
@@ -47,7 +51,69 @@ def _get_version() -> str:
         return "unknown"
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="DALE Vision Edge Agent")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Send a single heartbeat and exit",
+    )
+    return parser.parse_args()
+
+
+def _run_once(
+    *,
+    settings,
+    url: str,
+    version: str,
+    logger: logging.Logger,
+) -> int:
+    ok, status, error = send_heartbeat(
+        url=url,
+        edge_token=settings.edge_token,
+        store_id=settings.store_id,
+        agent_id=settings.agent_id,
+        version=version,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+    )
+
+    if status is None:
+        message = f"ERRO: Falha de conexao/timeout: {error or 'erro desconhecido'}"
+        print(message)
+        logger.error("Heartbeat -> %s status=ERROR error=%s", url, error)
+        return EXIT_NETWORK_ERROR
+
+    print(f"Heartbeat -> {url} status={status}")
+
+    if ok and status == 201:
+        logger.info("Heartbeat -> %s status=%s", url, status)
+        return 0
+
+    if status in AUTH_FAILURE_STATUSES:
+        message = f"HTTP {status} - Token inválido/expirado"
+        print(message)
+        logger.error(
+            "Auth rejected by backend (status=%s, store_id=%s, cloud_base_url=%s): %s",
+            status,
+            settings.store_id,
+            settings.cloud_base_url,
+            error or "auth_failed",
+        )
+        return EXIT_AUTH_ERROR
+
+    detail = error or f"HTTP {status}"
+    message = f"ERRO: Heartbeat falhou: {detail}"
+    print(message)
+    logger.error(
+        "Heartbeat failed once (status=%s, error=%s)",
+        status,
+        error,
+    )
+    return 1
+
+
 def main() -> int:
+    args = _parse_args()
     env_path = load_env_from_cwd()
     logger = _setup_logging()
 
@@ -57,7 +123,7 @@ def main() -> int:
         message = f"ERRO: {exc}"
         print(message)
         logger.error(message)
-        return 2
+        return EXIT_CONFIG_ERROR
     except ValueError as exc:
         message = f"ERRO: {exc}"
         print(message)
@@ -73,8 +139,17 @@ def main() -> int:
     url = f"{settings.cloud_base_url}/api/edge/events/"
     version = _get_version()
 
+    if args.once:
+        return _run_once(
+            settings=settings,
+            url=url,
+            version=version,
+            logger=logger,
+        )
+
     backoff_index = 0
-    auth_failures = 0
+    consecutive_failures = 0
+    last_failure_status = None
     while True:
         ok, status, error = send_heartbeat(
             url=url,
@@ -93,12 +168,15 @@ def main() -> int:
         if ok:
             logger.info("Heartbeat -> %s status=%s", url, status)
             backoff_index = 0
-            auth_failures = 0
+            consecutive_failures = 0
+            last_failure_status = None
             time.sleep(settings.heartbeat_interval_seconds)
             continue
 
+        consecutive_failures += 1
+        last_failure_status = status
+
         if status in AUTH_FAILURE_STATUSES:
-            auth_failures += 1
             logger.error(
                 "Auth rejected by backend (status=%s, store_id=%s, cloud_base_url=%s): %s",
                 status,
@@ -110,14 +188,18 @@ def main() -> int:
                 "ERRO: token/store inválido ou ambiente incorreto. "
                 "Regenere o .env no Wizard e execute novamente."
             )
-            if auth_failures >= MAX_CONSECUTIVE_AUTH_FAILURES:
-                logger.error(
-                    "Stopping agent after %s consecutive auth failures",
-                    MAX_CONSECUTIVE_AUTH_FAILURES,
-                )
-                return 3
-        else:
-            auth_failures = 0
+        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            message = (
+                f"ERRO FATAL: {MAX_CONSECUTIVE_FAILURES} falhas consecutivas. "
+                f"Ultimo status={last_failure_status if last_failure_status is not None else 'ERROR'}. Encerrando."
+            )
+            print(message)
+            logger.error(message)
+            if last_failure_status in AUTH_FAILURE_STATUSES:
+                return EXIT_AUTH_ERROR
+            if last_failure_status is None:
+                return EXIT_NETWORK_ERROR
+            return 1
 
         if error:
             logger.warning("Heartbeat failure: %s", error)
