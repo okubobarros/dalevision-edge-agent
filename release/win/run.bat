@@ -24,8 +24,10 @@ echo Logs: %CD%\logs\agent.log
 echo Stdout/Stderr: %CD%\stdout.log
 echo.
 
-dalevision-edge-agent.exe > ".\stdout.log" 2>&1
+echo [%DATE% %TIME%] START run.bat > ".\stdout.log"
+dalevision-edge-agent.exe >> ".\stdout.log" 2>&1
 set "exit_code=%errorlevel%"
+echo [%DATE% %TIME%] EXIT code=%exit_code% >> ".\stdout.log"
 
 if not "%exit_code%"=="0" (
   echo ---
@@ -37,3 +39,6 @@ if not "%exit_code%"=="0" (
 
 echo ---
 echo Agente encerrou normalmente.
+echo Janela mantida aberta para diagnostico.
+echo Se nao abrir ao dar duplo clique, rode manualmente: cmd /k run.bat
+pause

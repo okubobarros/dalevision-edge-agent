@@ -18,3 +18,4 @@ DICAS
 - Se aparecer .env.example em versoes antigas, ignore esse template e edite apenas o .env.
 - Se aparecer erro de firewall, libere o aplicativo e tente de novo.
 - Se der erro de token, gere um novo token no Wizard e copie o .env novamente.
+- Se a janela fechar rapido, abra o Prompt na pasta e rode: cmd /k run.bat
