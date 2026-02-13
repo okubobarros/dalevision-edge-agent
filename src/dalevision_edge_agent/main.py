@@ -12,6 +12,8 @@ from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 BACKOFF_SECONDS = [2, 5, 10, 20, 30]
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
+AUTH_FAILURE_STATUSES = {401, 403}
+MAX_CONSECUTIVE_AUTH_FAILURES = 3
 
 
 def _setup_logging() -> logging.Logger:
@@ -72,6 +74,7 @@ def main() -> int:
     version = _get_version()
 
     backoff_index = 0
+    auth_failures = 0
     while True:
         ok, status, error = send_heartbeat(
             url=url,
@@ -90,8 +93,31 @@ def main() -> int:
         if ok:
             logger.info("Heartbeat -> %s status=%s", url, status)
             backoff_index = 0
+            auth_failures = 0
             time.sleep(settings.heartbeat_interval_seconds)
             continue
+
+        if status in AUTH_FAILURE_STATUSES:
+            auth_failures += 1
+            logger.error(
+                "Auth rejected by backend (status=%s, store_id=%s, cloud_base_url=%s): %s",
+                status,
+                settings.store_id,
+                settings.cloud_base_url,
+                error or "auth_failed",
+            )
+            print(
+                "ERRO: token/store inválido ou ambiente incorreto. "
+                "Regenere o .env no Wizard e execute novamente."
+            )
+            if auth_failures >= MAX_CONSECUTIVE_AUTH_FAILURES:
+                logger.error(
+                    "Stopping agent after %s consecutive auth failures",
+                    MAX_CONSECUTIVE_AUTH_FAILURES,
+                )
+                return 3
+        else:
+            auth_failures = 0
 
         if error:
             logger.warning("Heartbeat failure: %s", error)

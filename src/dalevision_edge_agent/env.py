@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import uuid
 
 from dotenv import dotenv_values
 
@@ -120,6 +121,25 @@ def _normalize_token(value: str) -> str:
     return cleaned.strip()
 
 
+def _looks_like_placeholder(value: str) -> bool:
+    text = (value or "").strip().lower()
+    if not text:
+        return True
+    if "<" in text or ">" in text:
+        return True
+    hints = (
+        "token-do-edge",
+        "edge-token",
+        "your-token",
+        "your_store_id",
+        "uuid-da-store",
+        "seu_token",
+        "seu_store_id",
+        "changeme",
+    )
+    return any(hint in text for hint in hints)
+
+
 def load_settings() -> Settings:
     missing = []
     values = {}
@@ -134,6 +154,14 @@ def load_settings() -> Settings:
         raise ValueError("Missing required env vars: " + ", ".join(missing))
 
     logger = logging.getLogger("dalevision-edge-agent")
+    store_id = (values["STORE_ID"] or "").strip()
+    if _looks_like_placeholder(store_id):
+        raise ValueError("STORE_ID inválido. Cole o UUID real da loja gerado no Wizard.")
+    try:
+        uuid.UUID(store_id)
+    except Exception as exc:
+        raise ValueError("STORE_ID deve ser um UUID válido.") from exc
+    values["STORE_ID"] = store_id
 
     agent_id = _sanitize_agent_id(
         _get_env_value("AGENT_ID", OPTIONAL_ENV["AGENT_ID"], strip=True)
@@ -147,6 +175,8 @@ def load_settings() -> Settings:
     values["AGENT_ID"] = agent_id
 
     token = _normalize_token(values["EDGE_TOKEN"])
+    if _looks_like_placeholder(token):
+        raise InvalidTokenError("EDGE_TOKEN inválido. Cole o token real do Wizard.")
     values["EDGE_TOKEN"] = token
     prefix = token[:6]
     suffix = token[-4:] if len(token) >= 4 else token

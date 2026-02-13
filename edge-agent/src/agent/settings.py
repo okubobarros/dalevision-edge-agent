@@ -4,6 +4,7 @@ from pathlib import Path
 import yaml
 import os
 import sys
+import uuid
 
 
 @dataclass
@@ -85,6 +86,25 @@ def _mask_secret(value: str) -> str:
     return f"{v[:4]}...{v[-4:]}"
 
 
+def _looks_like_placeholder(value: str) -> bool:
+    text = (value or "").strip().lower()
+    if not text:
+        return True
+    if "<" in text or ">" in text:
+        return True
+    hints = (
+        "token-do-edge",
+        "edge-token",
+        "your-token",
+        "uuid-da-store",
+        "your_store_id",
+        "seu_token",
+        "seu_store_id",
+        "changeme",
+    )
+    return any(h in text for h in hints)
+
+
 def _env_override(d: Dict[str, Any]) -> Dict[str, Any]:
     """
     Permite override via env (útil pra Docker depois).
@@ -162,9 +182,11 @@ def load_settings(path: str) -> Settings:
         base_url = os.getenv("CLOUD_BASE_URL") or os.getenv("DALE_CLOUD_BASE_URL") or "http://127.0.0.1:8000"
 
     missing = []
-    if not agent.get("store_id"):
+    store_id_value = str(agent.get("store_id") or "").strip()
+    token_value = str(cloud.get("token") or "").strip()
+    if _looks_like_placeholder(store_id_value):
         missing.append("STORE_ID")
-    if not cloud.get("token"):
+    if _looks_like_placeholder(token_value):
         missing.append("EDGE_TOKEN")
     if not base_url:
         missing.append("CLOUD_BASE_URL")
@@ -175,6 +197,15 @@ def load_settings(path: str) -> Settings:
             + " (prefer STORE_ID, EDGE_TOKEN, CLOUD_BASE_URL)"
         )
         sys.exit(1)
+
+    try:
+        uuid.UUID(store_id_value)
+    except Exception:
+        print("[EDGE] STORE_ID deve ser UUID valido.")
+        sys.exit(1)
+
+    agent["store_id"] = store_id_value
+    cloud["token"] = token_value
 
     base_src = envs.get("base_src")
     store_src = envs.get("store_src")
