@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 import requests
 
@@ -20,16 +20,21 @@ def send_heartbeat(
     agent_id: str,
     version: str,
     timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+    extra_data: Optional[dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[int], Optional[str]]:
+    data = {
+        "store_id": store_id,
+        "ts": _utc_timestamp(),
+        "agent_id": agent_id,
+        "version": version,
+    }
+    if extra_data:
+        data.update(extra_data)
+
     payload = {
         "event_name": "edge_heartbeat",
         "source": "edge",
-        "data": {
-            "store_id": store_id,
-            "ts": _utc_timestamp(),
-            "agent_id": agent_id,
-            "version": version,
-        },
+        "data": data,
     }
     headers = {"X-EDGE-TOKEN": edge_token}
 

@@ -6,7 +6,16 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import time
+from typing import Any
 
+from .cameras import (
+    CAMERA_SYNC_INTERVAL_SECONDS,
+    build_camera_heartbeat_fields,
+    check_camera_health,
+    fetch_cameras,
+    fetch_roi,
+    send_camera_health_event,
+)
 from .env import InvalidTokenError, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 
@@ -150,7 +159,94 @@ def main() -> int:
     backoff_index = 0
     consecutive_failures = 0
     last_failure_status = None
+    last_camera_sync_at = 0.0
+    camera_states: dict[str, dict[str, Any]] = {}
+
     while True:
+        now = time.time()
+        if now - last_camera_sync_at >= CAMERA_SYNC_INTERVAL_SECONDS:
+            cameras, cameras_error = fetch_cameras(
+                cloud_base_url=settings.cloud_base_url,
+                edge_token=settings.edge_token,
+                store_id=settings.store_id,
+                logger=logger,
+            )
+            if cameras_error:
+                logger.warning("Camera sync skipped: %s", cameras_error)
+            else:
+                fresh_states: dict[str, dict[str, Any]] = {}
+                logger.info("Camera sync: %s cameras", len(cameras))
+                for camera in cameras:
+                    camera_id = str(
+                        camera.get("camera_id") or camera.get("id") or ""
+                    ).strip()
+                    if not camera_id:
+                        logger.warning("Skipping camera with missing id: %s", camera)
+                        continue
+
+                    try:
+                        health = check_camera_health(camera)
+                        roi_blob = camera.get("roi")
+                        roi_blob_version = (
+                            roi_blob.get("version")
+                            if isinstance(roi_blob, dict)
+                            else None
+                        )
+                        roi_version_hint = (
+                            camera.get("roi_version")
+                            or camera.get("roiVersion")
+                            or roi_blob_version
+                        )
+                        _, roi_version, cached, roi_error = fetch_roi(
+                            camera_id,
+                            cloud_base_url=settings.cloud_base_url,
+                            edge_token=settings.edge_token,
+                            expected_version=str(roi_version_hint)
+                            if roi_version_hint
+                            else None,
+                            logger=logger,
+                        )
+                        if roi_error:
+                            logger.warning("camera_id=%s roi_error=%s", camera_id, roi_error)
+                        health["roi_version"] = roi_version
+                        health["roi_cached"] = cached
+                        fresh_states[camera_id] = health
+                        logger.info(
+                            "camera_id=%s status=%s connect_ms=%s roi_version=%s cached=%s",
+                            camera_id,
+                            health.get("status"),
+                            health.get("connect_ms"),
+                            roi_version,
+                            cached,
+                        )
+                        ok_evt, status_evt, err_evt = send_camera_health_event(
+                            cloud_base_url=settings.cloud_base_url,
+                            edge_token=settings.edge_token,
+                            store_id=settings.store_id,
+                            agent_id=settings.agent_id,
+                            camera_health=health,
+                            logger=logger,
+                        )
+                        if not ok_evt:
+                            logger.warning(
+                                "camera_id=%s health event failed status=%s error=%s",
+                                camera_id,
+                                status_evt,
+                                err_evt,
+                            )
+                    except Exception as exc:
+                        logger.exception("camera_id=%s unexpected failure: %s", camera_id, exc)
+                        fresh_states[camera_id] = {
+                            "camera_id": camera_id,
+                            "status": "offline",
+                            "error": str(exc),
+                            "connect_ms": None,
+                            "roi_version": None,
+                        }
+                camera_states = fresh_states
+            last_camera_sync_at = now
+
+        camera_fields = build_camera_heartbeat_fields(camera_states)
         ok, status, error = send_heartbeat(
             url=url,
             edge_token=settings.edge_token,
@@ -158,6 +254,7 @@ def main() -> int:
             agent_id=settings.agent_id,
             version=version,
             timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            extra_data=camera_fields,
         )
 
         if status is None:
