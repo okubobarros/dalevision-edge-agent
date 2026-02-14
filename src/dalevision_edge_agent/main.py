@@ -271,7 +271,15 @@ def main() -> int:
                                 logger=logger,
                             )
                             if snapshot_path:
+                                health["snapshot_taken"] = True
+                                health["snapshot_local_path"] = snapshot_path
                                 health["snapshot_url"] = snapshot_path
+                                logger.info(
+                                    "camera_id=%s snapshot ready (upload pending)",
+                                    camera_id,
+                                )
+                            else:
+                                health["snapshot_taken"] = False
                         roi_blob = camera.get("roi")
                         roi_blob_version = (
                             roi_blob.get("version")

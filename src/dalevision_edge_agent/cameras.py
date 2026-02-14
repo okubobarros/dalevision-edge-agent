@@ -403,6 +403,10 @@ def send_camera_health_event(
     snapshot_url = camera_health.get("snapshot_url")
     if snapshot_url:
         payload["snapshot_url"] = snapshot_url
+    if "snapshot_taken" in camera_health:
+        payload["snapshot_taken"] = camera_health.get("snapshot_taken")
+    if "snapshot_local_path" in camera_health:
+        payload["snapshot_local_path"] = camera_health.get("snapshot_local_path")
     response, status, error = _request_json_with_backoff(
         method="POST",
         url=url,
@@ -473,6 +477,15 @@ def build_rtsp_candidates(camera: dict[str, Any]) -> list[str]:
     return candidates
 
 
+def _try_import_cv2():
+    try:
+        import cv2  # type: ignore
+
+        return cv2
+    except Exception:
+        return None
+
+
 def capture_snapshot_if_possible(
     *,
     camera_id: str,
@@ -480,16 +493,16 @@ def capture_snapshot_if_possible(
     logger: logging.Logger,
     timeout_seconds: int = 5,
 ) -> Optional[str]:
-    try:
-        import cv2  # type: ignore
-    except Exception:
+    cv2 = _try_import_cv2()
+    if cv2 is None:
         logger.info("camera_id=%s snapshot skipped (opencv not available)", camera_id)
         return None
 
     snapshots_dir = Path.cwd() / "cache" / "snapshots"
-    snapshots_dir.mkdir(parents=True, exist_ok=True)
-    filename = f"{camera_id}-{int(time.time())}.jpg"
-    output_path = snapshots_dir / filename
+    output_dir = snapshots_dir / camera_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{int(time.time())}.jpg"
+    output_path = output_dir / filename
 
     cap = cv2.VideoCapture(rtsp_url)
     try:
