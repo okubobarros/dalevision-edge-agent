@@ -13,6 +13,7 @@ if str(SRC) not in sys.path:
 
 from dalevision_edge_agent.cameras import (  # noqa: E402
     build_camera_heartbeat_fields,
+    capture_snapshot_if_possible,
     fetch_cameras,
     fetch_roi,
 )
@@ -84,6 +85,47 @@ class CamerasTests(unittest.TestCase):
         self.assertEqual(1, fields["cameras_offline"])
         self.assertEqual(1, fields["cameras_unknown"])
         self.assertEqual(4, len(fields["cameras"]))
+
+    @patch("dalevision_edge_agent.cameras._try_import_cv2")
+    @patch("dalevision_edge_agent.cameras._ffmpeg_path")
+    def test_snapshot_skips_when_opencv_and_ffmpeg_absent(
+        self,
+        mock_ffmpeg_path: Mock,
+        mock_try_import: Mock,
+    ) -> None:
+        mock_try_import.return_value = None
+        mock_ffmpeg_path.return_value = None
+        logger = Mock()
+
+        result = capture_snapshot_if_possible(
+            camera_id="cam-1",
+            rtsp_url="rtsp://user:pass@10.0.0.10:554/stream1",
+            logger=logger,
+        )
+
+        self.assertIsNone(result)
+
+    @patch("dalevision_edge_agent.cameras.subprocess.run")
+    @patch("dalevision_edge_agent.cameras._try_import_cv2")
+    @patch("dalevision_edge_agent.cameras._ffmpeg_path")
+    def test_snapshot_ffmpeg_failure_does_not_crash(
+        self,
+        mock_ffmpeg_path: Mock,
+        mock_try_import: Mock,
+        mock_run: Mock,
+    ) -> None:
+        mock_try_import.return_value = None
+        mock_ffmpeg_path.return_value = "ffmpeg"
+        mock_run.return_value = Mock(returncode=1, stderr="boom")
+        logger = Mock()
+
+        result = capture_snapshot_if_possible(
+            camera_id="cam-2",
+            rtsp_url="rtsp://user:pass@10.0.0.11:554/stream1",
+            logger=logger,
+        )
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
