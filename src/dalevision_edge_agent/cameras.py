@@ -12,19 +12,36 @@ from urllib.parse import urlparse
 import requests
 
 CAMERA_LIST_ENDPOINTS = (
-    "/api/edge/cameras/",
-    "/api/v1/stores/{store_id}/cameras",
+    "/api/v1/stores/{store_id}/cameras/",
 )
 ROI_ENDPOINTS = (
-    "/api/edge/cameras/{camera_id}/roi/latest",
     "/api/v1/cameras/{camera_id}/roi/latest",
 )
-EVENTS_ENDPOINT = "/api/edge/events/"
+HEALTH_ENDPOINT = "/api/v1/cameras/{camera_id}/health/"
 
 HTTP_TIMEOUT_SECONDS = 5
 HEALTHCHECK_TIMEOUT_SECONDS = 3
 HTTP_RETRY_DELAYS_SECONDS = (0.5, 1.0, 2.0)
 CAMERA_SYNC_INTERVAL_SECONDS = 60
+AUTH_FAILURE_STATUSES = {401, 403}
+MAX_AUTH_FAILURES = 5
+
+
+class AuthFailureTracker:
+    def __init__(self, max_failures: int = MAX_AUTH_FAILURES) -> None:
+        self.max_failures = max_failures
+        self.consecutive = 0
+
+    def register(self, status: Optional[int]) -> bool:
+        if status in AUTH_FAILURE_STATUSES:
+            self.consecutive += 1
+            return self.consecutive >= self.max_failures
+        if status is not None:
+            self.consecutive = 0
+        return False
+
+    def reset(self) -> None:
+        self.consecutive = 0
 
 
 def _utc_timestamp() -> str:
@@ -49,11 +66,29 @@ def _extract_camera_id(camera: dict[str, Any]) -> str:
 
 
 def _extract_rtsp_url(camera: dict[str, Any]) -> str:
-    for key in ("rtsp_url", "stream_url", "rtsp", "url"):
+    for key in ("rtsp_url", "rtsp_url_masked", "stream_url", "rtsp", "url"):
         value = camera.get(key)
         if value:
             return str(value).strip()
     return ""
+
+
+def _extract_rtsp_host_port(camera: dict[str, Any]) -> tuple[Optional[str], int]:
+    host = None
+    for key in ("rtsp_host", "host", "ip", "camera_ip"):
+        value = camera.get(key)
+        if value:
+            host = str(value).strip()
+            break
+    port_raw = camera.get("rtsp_port") or camera.get("port")
+    if isinstance(port_raw, int):
+        port = port_raw
+    else:
+        try:
+            port = int(str(port_raw))
+        except Exception:
+            port = 554
+    return host, port
 
 
 def _request_json_with_backoff(
@@ -65,6 +100,7 @@ def _request_json_with_backoff(
     logger: logging.Logger,
     params: Optional[dict[str, Any]] = None,
     json_body: Optional[dict[str, Any]] = None,
+    auth_tracker: Optional[AuthFailureTracker] = None,
 ) -> tuple[Optional[dict[str, Any]], Optional[int], Optional[str]]:
     last_error: Optional[str] = None
     for attempt in range(len(HTTP_RETRY_DELAYS_SECONDS) + 1):
@@ -79,10 +115,14 @@ def _request_json_with_backoff(
             )
             status = response.status_code
             if 200 <= status < 300:
+                if auth_tracker:
+                    auth_tracker.reset()
                 try:
                     return response.json(), status, None
                 except Exception:
                     return {}, status, None
+            if auth_tracker and auth_tracker.register(status):
+                return None, status, "auth_failure_threshold"
             text = response.text.strip()[:500] if response.text else ""
             return None, status, text or f"HTTP {status}"
         except requests.RequestException as exc:
@@ -108,6 +148,7 @@ def fetch_cameras(
     store_id: str,
     timeout_seconds: int = HTTP_TIMEOUT_SECONDS,
     logger: Optional[logging.Logger] = None,
+    auth_tracker: Optional[AuthFailureTracker] = None,
 ) -> tuple[list[dict[str, Any]], Optional[str]]:
     logger = logger or logging.getLogger("dalevision-edge-agent")
     base_url = _normalize_base_url(cloud_base_url)
@@ -124,6 +165,7 @@ def fetch_cameras(
             params=params,
             timeout_seconds=timeout_seconds,
             logger=logger,
+            auth_tracker=auth_tracker,
         )
         if payload is None:
             logger.warning(
@@ -195,6 +237,7 @@ def fetch_roi(
     timeout_seconds: int = HTTP_TIMEOUT_SECONDS,
     cache_dir: Optional[Path] = None,
     logger: Optional[logging.Logger] = None,
+    auth_tracker: Optional[AuthFailureTracker] = None,
 ) -> tuple[Optional[dict[str, Any]], Optional[str], bool, Optional[str]]:
     logger = logger or logging.getLogger("dalevision-edge-agent")
     cached = _load_cached_roi(camera_id=camera_id, cache_dir=cache_dir)
@@ -219,6 +262,7 @@ def fetch_roi(
             headers=headers,
             timeout_seconds=timeout_seconds,
             logger=logger,
+            auth_tracker=auth_tracker,
         )
         if payload is None:
             logger.warning(
@@ -243,29 +287,27 @@ def check_camera_health(
     camera: dict[str, Any],
     *,
     timeout_seconds: int = HEALTHCHECK_TIMEOUT_SECONDS,
+    perform_describe: bool = False,
 ) -> dict[str, Any]:
     camera_id = _extract_camera_id(camera)
     rtsp_url = _extract_rtsp_url(camera)
     checked_at = _utc_timestamp()
 
-    if not rtsp_url:
-        return {
-            "camera_id": camera_id,
-            "status": "offline",
-            "error": "rtsp_url_missing",
-            "connect_ms": None,
-            "checked_at": checked_at,
-        }
+    host = None
+    port = 554
+    if rtsp_url:
+        parsed = urlparse(rtsp_url)
+        host = parsed.hostname
+        port = parsed.port or 554
+    if not host:
+        host, port = _extract_rtsp_host_port(camera)
 
-    parsed = urlparse(rtsp_url)
-    host = parsed.hostname
-    port = parsed.port or 554
     if not host:
         return {
             "camera_id": camera_id,
-            "status": "offline",
-            "error": "rtsp_host_missing",
-            "connect_ms": None,
+            "status": "error",
+            "error": "rtsp_host_missing" if rtsp_url else "rtsp_url_missing",
+            "latency_ms": None,
             "checked_at": checked_at,
         }
 
@@ -274,7 +316,34 @@ def check_camera_health(
         sock = socket.create_connection((host, port), timeout=timeout_seconds)
         try:
             sock.settimeout(timeout_seconds)
-            connect_ms = int((time.perf_counter() - started) * 1000)
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            if perform_describe:
+                describe_url = rtsp_url or f"rtsp://{host}:{port}/"
+                request = (
+                    f"DESCRIBE {describe_url} RTSP/1.0\r\n"
+                    "CSeq: 1\r\n"
+                    "User-Agent: dalevision-edge-agent\r\n"
+                    "Accept: application/sdp\r\n\r\n"
+                ).encode("ascii", errors="ignore")
+                try:
+                    sock.sendall(request)
+                    response = sock.recv(4096)
+                except OSError as exc:
+                    return {
+                        "camera_id": camera_id,
+                        "status": "degraded",
+                        "error": f"describe_failed:{exc}",
+                        "latency_ms": latency_ms,
+                        "checked_at": checked_at,
+                    }
+                if not response.startswith(b"RTSP/1.0"):
+                    return {
+                        "camera_id": camera_id,
+                        "status": "degraded",
+                        "error": "describe_invalid_response",
+                        "latency_ms": latency_ms,
+                        "checked_at": checked_at,
+                    }
         finally:
             sock.close()
     except socket.timeout:
@@ -282,7 +351,7 @@ def check_camera_health(
             "camera_id": camera_id,
             "status": "offline",
             "error": "timeout",
-            "connect_ms": None,
+            "latency_ms": None,
             "checked_at": checked_at,
         }
     except OSError as exc:
@@ -290,16 +359,16 @@ def check_camera_health(
             "camera_id": camera_id,
             "status": "offline",
             "error": str(exc),
-            "connect_ms": None,
+            "latency_ms": None,
             "checked_at": checked_at,
         }
 
-    status = "online" if connect_ms <= 1500 else "degraded"
+    status = "online" if latency_ms <= 1500 else "degraded"
     return {
         "camera_id": camera_id,
         "status": status,
         "error": None if status == "online" else "slow_connect",
-        "connect_ms": connect_ms,
+        "latency_ms": latency_ms,
         "checked_at": checked_at,
     }
 
@@ -308,60 +377,52 @@ def send_camera_health_event(
     *,
     cloud_base_url: str,
     edge_token: str,
-    store_id: str,
-    agent_id: str,
     camera_health: dict[str, Any],
     timeout_seconds: int = HTTP_TIMEOUT_SECONDS,
     logger: Optional[logging.Logger] = None,
+    auth_tracker: Optional[AuthFailureTracker] = None,
 ) -> tuple[bool, Optional[int], Optional[str]]:
     logger = logger or logging.getLogger("dalevision-edge-agent")
-    url = f"{_normalize_base_url(cloud_base_url)}{EVENTS_ENDPOINT}"
+    camera_id = camera_health.get("camera_id")
+    url = f"{_normalize_base_url(cloud_base_url)}{HEALTH_ENDPOINT.format(camera_id=camera_id)}"
     payload = {
-        "event_name": "camera.health",
-        "source": "edge",
-        "data": {
-            "store_id": store_id,
-            "agent_id": agent_id,
-            "camera_id": camera_health.get("camera_id"),
-            "status": camera_health.get("status"),
-            "error": camera_health.get("error"),
-            "connect_ms": camera_health.get("connect_ms"),
-            "checked_at": camera_health.get("checked_at"),
-        },
+        "status": camera_health.get("status"),
+        "latency_ms": camera_health.get("latency_ms"),
+        "error": camera_health.get("error"),
+        "ts": _utc_timestamp(),
     }
-    try:
-        response = requests.post(
-            url,
-            headers=_headers(edge_token),
-            json=payload,
-            timeout=timeout_seconds,
-        )
-        status = response.status_code
-        ok = 200 <= status < 300
-        if ok:
-            return True, status, None
-        detail = response.text.strip()[:500] if response.text else f"HTTP {status}"
-        logger.warning(
-            "camera_id=%s health event rejected (status=%s detail=%s)",
-            camera_health.get("camera_id"),
-            status,
-            detail,
-        )
-        return False, status, detail
-    except requests.RequestException as exc:
-        return False, None, str(exc)
+    response, status, error = _request_json_with_backoff(
+        method="POST",
+        url=url,
+        headers=_headers(edge_token),
+        json_body=payload,
+        timeout_seconds=timeout_seconds,
+        logger=logger,
+        auth_tracker=auth_tracker,
+    )
+    ok = response is not None and status is not None and 200 <= status < 300
+    if ok:
+        return True, status, None
+    detail = error or (f"HTTP {status}" if status else None)
+    logger.warning(
+        "camera_id=%s health event rejected (status=%s detail=%s)",
+        camera_health.get("camera_id"),
+        status,
+        detail,
+    )
+    return False, status, detail
 
 
 def build_camera_heartbeat_fields(
     states: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
     summary: list[dict[str, Any]] = []
-    counts = {"online": 0, "degraded": 0, "offline": 0}
+    counts = {"online": 0, "degraded": 0, "offline": 0, "unknown": 0}
     for camera_id in sorted(states.keys()):
         state = states[camera_id]
-        status = str(state.get("status") or "offline")
+        status = str(state.get("status") or "unknown")
         if status not in counts:
-            status = "offline"
+            status = "unknown"
         counts[status] += 1
         summary.append(
             {
@@ -376,5 +437,6 @@ def build_camera_heartbeat_fields(
         "cameras_online": counts["online"],
         "cameras_degraded": counts["degraded"],
         "cameras_offline": counts["offline"],
+        "cameras_unknown": counts["unknown"],
         "cameras": summary,
     }

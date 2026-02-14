@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 from .cameras import (
+    AuthFailureTracker,
     CAMERA_SYNC_INTERVAL_SECONDS,
     build_camera_heartbeat_fields,
     check_camera_health,
@@ -23,6 +24,7 @@ BACKOFF_SECONDS = [2, 5, 10, 20, 30]
 LOG_MAX_BYTES = 2 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 AUTH_FAILURE_STATUSES = {401, 403}
+MAX_CONSECUTIVE_AUTH_FAILURES = 5
 MAX_CONSECUTIVE_FAILURES = 10
 EXIT_CONFIG_ERROR = 2
 EXIT_AUTH_ERROR = 3
@@ -121,6 +123,13 @@ def _run_once(
     return 1
 
 
+def _is_camera_active(camera: dict[str, Any]) -> bool:
+    for key in ("active", "is_active", "enabled", "isEnabled"):
+        if key in camera:
+            return bool(camera.get(key))
+    return True
+
+
 def main() -> int:
     args = _parse_args()
     env_path = load_env_from_cwd()
@@ -159,24 +168,58 @@ def main() -> int:
     backoff_index = 0
     consecutive_failures = 0
     last_failure_status = None
+    consecutive_auth_failures = 0
     last_camera_sync_at = 0.0
     camera_states: dict[str, dict[str, Any]] = {}
+    camera_auth_tracker = AuthFailureTracker(max_failures=MAX_CONSECUTIVE_AUTH_FAILURES)
+    camera_sync_interval = max(
+        CAMERA_SYNC_INTERVAL_SECONDS,
+        settings.camera_heartbeat_interval_seconds,
+    )
 
     while True:
         now = time.time()
-        if now - last_camera_sync_at >= CAMERA_SYNC_INTERVAL_SECONDS:
+        if now - last_camera_sync_at >= camera_sync_interval:
             cameras, cameras_error = fetch_cameras(
                 cloud_base_url=settings.cloud_base_url,
                 edge_token=settings.edge_token,
                 store_id=settings.store_id,
                 logger=logger,
+                auth_tracker=camera_auth_tracker,
             )
             if cameras_error:
                 logger.warning("Camera sync skipped: %s", cameras_error)
+                if camera_auth_tracker.consecutive >= MAX_CONSECUTIVE_AUTH_FAILURES:
+                    message = (
+                        f"ERRO FATAL: {MAX_CONSECUTIVE_AUTH_FAILURES} falhas de autenticacao "
+                        "consecutivas ao sincronizar cameras. Encerrando."
+                    )
+                    print(message)
+                    logger.error(message)
+                    return EXIT_AUTH_ERROR
             else:
                 fresh_states: dict[str, dict[str, Any]] = {}
-                logger.info("Camera sync: %s cameras", len(cameras))
-                for camera in cameras:
+                active_cameras = [c for c in cameras if _is_camera_active(c)]
+                if len(active_cameras) > settings.max_active_cameras:
+                    ignored = active_cameras[settings.max_active_cameras :]
+                    ignored_ids = [
+                        str(c.get("camera_id") or c.get("id") or "")
+                        for c in ignored
+                    ]
+                    logger.warning(
+                        "Limite do plano: processando %s de %s cameras ativas. Ignorando %s: %s",
+                        settings.max_active_cameras,
+                        len(active_cameras),
+                        len(ignored),
+                        ", ".join([cid for cid in ignored_ids if cid]),
+                    )
+                    active_cameras = active_cameras[: settings.max_active_cameras]
+                logger.info(
+                    "Camera sync: %s cameras (ativas=%s)",
+                    len(cameras),
+                    len(active_cameras),
+                )
+                for camera in active_cameras:
                     camera_id = str(
                         camera.get("camera_id") or camera.get("id") or ""
                     ).strip()
@@ -185,7 +228,10 @@ def main() -> int:
                         continue
 
                     try:
-                        health = check_camera_health(camera)
+                        health = check_camera_health(
+                            camera,
+                            perform_describe=settings.rtsp_describe_enabled,
+                        )
                         roi_blob = camera.get("roi")
                         roi_blob_version = (
                             roi_blob.get("version")
@@ -205,27 +251,35 @@ def main() -> int:
                             if roi_version_hint
                             else None,
                             logger=logger,
+                            auth_tracker=camera_auth_tracker,
                         )
                         if roi_error:
                             logger.warning("camera_id=%s roi_error=%s", camera_id, roi_error)
+                        if camera_auth_tracker.consecutive >= MAX_CONSECUTIVE_AUTH_FAILURES:
+                            message = (
+                                f"ERRO FATAL: {MAX_CONSECUTIVE_AUTH_FAILURES} falhas de "
+                                "autenticacao consecutivas ao buscar ROI. Encerrando."
+                            )
+                            print(message)
+                            logger.error(message)
+                            return EXIT_AUTH_ERROR
                         health["roi_version"] = roi_version
                         health["roi_cached"] = cached
                         fresh_states[camera_id] = health
                         logger.info(
-                            "camera_id=%s status=%s connect_ms=%s roi_version=%s cached=%s",
+                            "camera_id=%s status=%s latency_ms=%s roi_version=%s cached=%s",
                             camera_id,
                             health.get("status"),
-                            health.get("connect_ms"),
+                            health.get("latency_ms"),
                             roi_version,
                             cached,
                         )
                         ok_evt, status_evt, err_evt = send_camera_health_event(
                             cloud_base_url=settings.cloud_base_url,
                             edge_token=settings.edge_token,
-                            store_id=settings.store_id,
-                            agent_id=settings.agent_id,
                             camera_health=health,
                             logger=logger,
+                            auth_tracker=camera_auth_tracker,
                         )
                         if not ok_evt:
                             logger.warning(
@@ -234,13 +288,21 @@ def main() -> int:
                                 status_evt,
                                 err_evt,
                             )
+                        if camera_auth_tracker.consecutive >= MAX_CONSECUTIVE_AUTH_FAILURES:
+                            message = (
+                                f"ERRO FATAL: {MAX_CONSECUTIVE_AUTH_FAILURES} falhas de "
+                                "autenticacao consecutivas ao enviar eventos. Encerrando."
+                            )
+                            print(message)
+                            logger.error(message)
+                            return EXIT_AUTH_ERROR
                     except Exception as exc:
                         logger.exception("camera_id=%s unexpected failure: %s", camera_id, exc)
                         fresh_states[camera_id] = {
                             "camera_id": camera_id,
                             "status": "offline",
                             "error": str(exc),
-                            "connect_ms": None,
+                            "latency_ms": None,
                             "roi_version": None,
                         }
                 camera_states = fresh_states
@@ -267,6 +329,7 @@ def main() -> int:
             backoff_index = 0
             consecutive_failures = 0
             last_failure_status = None
+            consecutive_auth_failures = 0
             time.sleep(settings.heartbeat_interval_seconds)
             continue
 
@@ -274,6 +337,7 @@ def main() -> int:
         last_failure_status = status
 
         if status in AUTH_FAILURE_STATUSES:
+            consecutive_auth_failures += 1
             logger.error(
                 "Auth rejected by backend (status=%s, store_id=%s, cloud_base_url=%s): %s",
                 status,
@@ -285,6 +349,16 @@ def main() -> int:
                 "ERRO: token/store inválido ou ambiente incorreto. "
                 "Regenere o .env no Wizard e execute novamente."
             )
+            if consecutive_auth_failures >= MAX_CONSECUTIVE_AUTH_FAILURES:
+                message = (
+                    f"ERRO FATAL: {MAX_CONSECUTIVE_AUTH_FAILURES} falhas "
+                    "de autenticacao consecutivas. Encerrando."
+                )
+                print(message)
+                logger.error(message)
+                return EXIT_AUTH_ERROR
+        elif status is not None:
+            consecutive_auth_failures = 0
         if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
             message = (
                 f"ERRO FATAL: {MAX_CONSECUTIVE_FAILURES} falhas consecutivas. "

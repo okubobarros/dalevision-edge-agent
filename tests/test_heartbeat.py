@@ -31,6 +31,7 @@ class HeartbeatTests(unittest.TestCase):
                 "cameras_online": 1,
                 "cameras_degraded": 0,
                 "cameras_offline": 1,
+                "cameras_unknown": 0,
                 "cameras": [
                     {"camera_id": "cam-1", "status": "online", "roi_version": "v1"},
                     {"camera_id": "cam-2", "status": "offline", "roi_version": "v2"},

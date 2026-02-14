@@ -22,6 +22,7 @@ OPTIONAL_ENV = {
 
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
 DEFAULT_CAMERA_HEARTBEAT_INTERVAL_SECONDS = 30
+DEFAULT_MAX_ACTIVE_CAMERAS = 3
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,8 @@ class Settings:
     agent_id: str
     heartbeat_interval_seconds: int
     camera_heartbeat_interval_seconds: int
+    max_active_cameras: int
+    rtsp_describe_enabled: bool
 
 
 class InvalidTokenError(ValueError):
@@ -101,6 +104,18 @@ def _parse_int_env(name: str, default: int) -> int:
         return int(raw)
     except ValueError as exc:
         raise ValueError(f"Invalid integer for {name}: {raw}") from exc
+
+
+def _parse_bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean for {name}: {raw}")
 
 
 def _normalize_base_url(url: str) -> str:
@@ -204,11 +219,18 @@ def load_settings() -> Settings:
         "CAMERA_HEARTBEAT_INTERVAL_SECONDS",
         DEFAULT_CAMERA_HEARTBEAT_INTERVAL_SECONDS,
     )
+    max_active_cameras = _parse_int_env(
+        "MAX_ACTIVE_CAMERAS",
+        DEFAULT_MAX_ACTIVE_CAMERAS,
+    )
+    rtsp_describe_enabled = _parse_bool_env("RTSP_DESCRIBE_ENABLED", False)
 
     if heartbeat_interval <= 0:
         raise ValueError("HEARTBEAT_INTERVAL_SECONDS must be > 0")
     if camera_heartbeat_interval <= 0:
         raise ValueError("CAMERA_HEARTBEAT_INTERVAL_SECONDS must be > 0")
+    if max_active_cameras <= 0:
+        raise ValueError("MAX_ACTIVE_CAMERAS must be > 0")
 
     return Settings(
         cloud_base_url=_normalize_base_url(values["CLOUD_BASE_URL"]),
@@ -217,4 +239,6 @@ def load_settings() -> Settings:
         agent_id=values["AGENT_ID"],
         heartbeat_interval_seconds=heartbeat_interval,
         camera_heartbeat_interval_seconds=camera_heartbeat_interval,
+        max_active_cameras=max_active_cameras,
+        rtsp_describe_enabled=rtsp_describe_enabled,
     )

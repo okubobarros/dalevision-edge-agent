@@ -74,14 +74,16 @@ class CamerasTests(unittest.TestCase):
                 "cam-1": {"status": "online", "roi_version": "v1"},
                 "cam-2": {"status": "offline", "roi_version": "v2"},
                 "cam-3": {"status": "degraded", "roi_version": "v3"},
+                "cam-4": {"status": "mystery", "roi_version": "v4"},
             }
         )
 
-        self.assertEqual(3, fields["cameras_total"])
+        self.assertEqual(4, fields["cameras_total"])
         self.assertEqual(1, fields["cameras_online"])
         self.assertEqual(1, fields["cameras_degraded"])
         self.assertEqual(1, fields["cameras_offline"])
-        self.assertEqual(3, len(fields["cameras"]))
+        self.assertEqual(1, fields["cameras_unknown"])
+        self.assertEqual(4, len(fields["cameras"]))
 
 
 if __name__ == "__main__":
