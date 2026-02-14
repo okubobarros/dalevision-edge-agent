@@ -73,6 +73,14 @@ def _extract_rtsp_url(camera: dict[str, Any]) -> str:
     return ""
 
 
+def _extract_rtsp_credentials(camera: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
+    username = camera.get("username") or camera.get("user") or camera.get("rtsp_user")
+    password = camera.get("password") or camera.get("pass") or camera.get("rtsp_pass")
+    user = str(username).strip() if username else None
+    pwd = str(password).strip() if password else None
+    return (user or None), (pwd or None)
+
+
 def _extract_rtsp_host_port(camera: dict[str, Any]) -> tuple[Optional[str], int]:
     host = None
     for key in ("rtsp_host", "host", "ip", "camera_ip"):
@@ -288,9 +296,10 @@ def check_camera_health(
     *,
     timeout_seconds: int = HEALTHCHECK_TIMEOUT_SECONDS,
     perform_describe: bool = False,
+    rtsp_url_override: Optional[str] = None,
 ) -> dict[str, Any]:
     camera_id = _extract_camera_id(camera)
-    rtsp_url = _extract_rtsp_url(camera)
+    rtsp_url = rtsp_url_override or _extract_rtsp_url(camera)
     checked_at = _utc_timestamp()
 
     host = None
@@ -391,6 +400,9 @@ def send_camera_health_event(
         "error": camera_health.get("error"),
         "ts": _utc_timestamp(),
     }
+    snapshot_url = camera_health.get("snapshot_url")
+    if snapshot_url:
+        payload["snapshot_url"] = snapshot_url
     response, status, error = _request_json_with_backoff(
         method="POST",
         url=url,
@@ -411,6 +423,92 @@ def send_camera_health_event(
         detail,
     )
     return False, status, detail
+
+
+def build_rtsp_candidates(camera: dict[str, Any]) -> list[str]:
+    rtsp_url = _extract_rtsp_url(camera)
+    host, port = _extract_rtsp_host_port(camera)
+    user, pwd = _extract_rtsp_credentials(camera)
+    if not host:
+        return [rtsp_url] if rtsp_url else []
+
+    auth = ""
+    if user and pwd:
+        auth = f"{user}:{pwd}@"
+    base = f"rtsp://{auth}{host}:{port}"
+
+    channel = camera.get("channel") or camera.get("rtsp_channel") or 1
+    try:
+        channel_int = int(channel)
+    except Exception:
+        channel_int = 1
+
+    connection_type = str(camera.get("connection_type") or "").lower()
+    is_nvr = connection_type in {"nvr", "dvr"} or camera.get("channel") is not None
+
+    presets: list[str] = []
+    if is_nvr:
+        presets.extend(
+            [
+                f"{base}/Streaming/Channels/{channel_int}01",
+                f"{base}/Channels/{channel_int}01",
+                f"{base}/cam/realmonitor?channel={channel_int}&subtype=0",
+            ]
+        )
+    else:
+        presets.extend(
+            [
+                f"{base}/stream1",
+                f"{base}/Streaming/Channels/101",
+                f"{base}/h264/ch1/main/av_stream",
+            ]
+        )
+
+    candidates: list[str] = []
+    if rtsp_url:
+        candidates.append(rtsp_url)
+    for preset in presets:
+        if preset not in candidates:
+            candidates.append(preset)
+    return candidates
+
+
+def capture_snapshot_if_possible(
+    *,
+    camera_id: str,
+    rtsp_url: str,
+    logger: logging.Logger,
+    timeout_seconds: int = 5,
+) -> Optional[str]:
+    try:
+        import cv2  # type: ignore
+    except Exception:
+        logger.info("camera_id=%s snapshot skipped (opencv not available)", camera_id)
+        return None
+
+    snapshots_dir = Path.cwd() / "cache" / "snapshots"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{camera_id}-{int(time.time())}.jpg"
+    output_path = snapshots_dir / filename
+
+    cap = cv2.VideoCapture(rtsp_url)
+    try:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_seconds * 1000)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_seconds * 1000)
+    except Exception:
+        pass
+
+    try:
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            logger.info("camera_id=%s snapshot capture failed", camera_id)
+            return None
+        cv2.imwrite(str(output_path), frame)
+        logger.info("camera_id=%s snapshot captured path=%s", camera_id, output_path)
+        return str(output_path)
+    finally:
+        cap.release()
 
 
 def build_camera_heartbeat_fields(

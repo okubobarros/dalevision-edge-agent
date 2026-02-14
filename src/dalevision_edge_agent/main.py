@@ -12,6 +12,8 @@ from .cameras import (
     AuthFailureTracker,
     CAMERA_SYNC_INTERVAL_SECONDS,
     build_camera_heartbeat_fields,
+    build_rtsp_candidates,
+    capture_snapshot_if_possible,
     check_camera_health,
     fetch_cameras,
     fetch_roi,
@@ -228,10 +230,48 @@ def main() -> int:
                         continue
 
                     try:
-                        health = check_camera_health(
-                            camera,
-                            perform_describe=settings.rtsp_describe_enabled,
-                        )
+                        candidates = build_rtsp_candidates(camera)
+                        if not candidates:
+                            logger.warning("camera_id=%s no RTSP candidates", camera_id)
+                        else:
+                            logger.info(
+                                "camera_id=%s RTSP candidates=%s",
+                                camera_id,
+                                len(candidates),
+                            )
+                        selected_rtsp_url = None
+                        health = {
+                            "camera_id": camera_id,
+                            "status": "error",
+                            "error": "rtsp_candidates_missing",
+                            "latency_ms": None,
+                            "checked_at": None,
+                        }
+                        for candidate in candidates:
+                            health = check_camera_health(
+                                camera,
+                                perform_describe=settings.rtsp_describe_enabled,
+                                rtsp_url_override=candidate,
+                            )
+                            if health.get("status") in {"online", "degraded"}:
+                                logger.info(
+                                    "camera_id=%s RTSP selected=%s",
+                                    camera_id,
+                                    candidate,
+                                )
+                                selected_rtsp_url = candidate
+                                break
+                        if not selected_rtsp_url and candidates:
+                            selected_rtsp_url = candidates[-1]
+                        if selected_rtsp_url:
+                            health["rtsp_url_used"] = selected_rtsp_url
+                            snapshot_path = capture_snapshot_if_possible(
+                                camera_id=camera_id,
+                                rtsp_url=selected_rtsp_url,
+                                logger=logger,
+                            )
+                            if snapshot_path:
+                                health["snapshot_url"] = snapshot_path
                         roi_blob = camera.get("roi")
                         roi_blob_version = (
                             roi_blob.get("version")
