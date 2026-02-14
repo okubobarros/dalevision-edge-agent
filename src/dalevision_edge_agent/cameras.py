@@ -5,6 +5,8 @@ import json
 import logging
 from pathlib import Path
 import socket
+import subprocess
+import shutil
 import time
 from typing import Any, Optional
 from urllib.parse import urlparse
@@ -486,6 +488,10 @@ def _try_import_cv2():
         return None
 
 
+def _ffmpeg_path() -> Optional[str]:
+    return shutil.which("ffmpeg")
+
+
 def capture_snapshot_if_possible(
     *,
     camera_id: str,
@@ -495,8 +501,18 @@ def capture_snapshot_if_possible(
 ) -> Optional[str]:
     cv2 = _try_import_cv2()
     if cv2 is None:
-        logger.info("camera_id=%s snapshot skipped (opencv not available)", camera_id)
-        return None
+        logger.info("[EDGE] OpenCV não disponível; tentando fallback ffmpeg")
+        ffmpeg = _ffmpeg_path()
+        if not ffmpeg:
+            logger.info("camera_id=%s snapshot skipped (ffmpeg not available)", camera_id)
+            return None
+        return _capture_snapshot_ffmpeg(
+            camera_id=camera_id,
+            rtsp_url=rtsp_url,
+            logger=logger,
+            timeout_seconds=timeout_seconds,
+            ffmpeg_path=ffmpeg,
+        )
 
     snapshots_dir = Path.cwd() / "cache" / "snapshots"
     output_dir = snapshots_dir / camera_id
@@ -522,6 +538,57 @@ def capture_snapshot_if_possible(
         return str(output_path)
     finally:
         cap.release()
+
+
+def _capture_snapshot_ffmpeg(
+    *,
+    camera_id: str,
+    rtsp_url: str,
+    logger: logging.Logger,
+    timeout_seconds: int,
+    ffmpeg_path: str,
+) -> Optional[str]:
+    snapshots_dir = Path.cwd() / "cache" / "snapshots"
+    output_dir = snapshots_dir / camera_id
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{int(time.time())}.jpg"
+    command = [
+        ffmpeg_path,
+        "-rtsp_transport",
+        "tcp",
+        "-i",
+        rtsp_url,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        "-y",
+        str(output_path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+            check=False,
+            text=True,
+        )
+    except subprocess.TimeoutExpired:
+        logger.info("camera_id=%s snapshot ffmpeg timeout", camera_id)
+        return None
+    except OSError as exc:
+        logger.info("camera_id=%s snapshot ffmpeg error=%s", camera_id, exc)
+        return None
+
+    if result.returncode != 0 or not output_path.exists():
+        stderr = (result.stderr or "").strip().splitlines()
+        detail = stderr[-1] if stderr else "ffmpeg_failed"
+        logger.info("camera_id=%s snapshot ffmpeg failed: %s", camera_id, detail)
+        return None
+
+    logger.info("camera_id=%s snapshot captured path=%s", camera_id, output_path)
+    return str(output_path)
 
 
 def build_camera_heartbeat_fields(
