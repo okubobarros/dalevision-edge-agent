@@ -263,6 +263,8 @@ def main() -> int:
                                 break
                         if not selected_rtsp_url and candidates:
                             selected_rtsp_url = candidates[-1]
+                        if "snapshot_taken" not in health:
+                            health["snapshot_taken"] = False
                         if selected_rtsp_url:
                             health["rtsp_url_used"] = selected_rtsp_url
                             snapshot_path = capture_snapshot_if_possible(
