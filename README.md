@@ -18,6 +18,7 @@ Em modo normal (`run.bat`), o agente executa continuamente:
    - mede `latency_ms`
    - publica health em `/api/v1/cameras/:id/health/`
    - busca `roi/latest` por camera e cacheia localmente por `camera_id + version`
+   - tenta capturar snapshot minimo (OpenCV; fallback ffmpeg se disponivel)
 4. inclui no heartbeat:
    - `cameras_total`, `cameras_online`, `cameras_degraded`, `cameras_offline`, `cameras_unknown`
    - lista resumida `cameras` com `camera_id`, `status`, `roi_version`
@@ -29,6 +30,13 @@ Falha de uma camera nao derruba o processo inteiro.
 - `GET /api/v1/cameras/:id/roi/latest`
 - `POST /api/v1/cameras/:id/health/`
 - `POST /api/edge/events/` (heartbeat)
+
+## Snapshot (opcional)
+O snapshot e opcional e nao deve quebrar o agente.
+- Primeiro tenta OpenCV (se empacotado).
+- Se nao houver OpenCV, tenta `ffmpeg` no PATH.
+- Se ambos falharem, loga e segue sem snapshot.
+Snapshots sao salvos em `cache/snapshots/<camera_id>/<timestamp>.jpg`.
 
 ## Como cadastrar cameras no cloud e ver status no dashboard
 1. Cadastre as cameras da loja no backend cloud (vinculadas ao `STORE_ID`).
