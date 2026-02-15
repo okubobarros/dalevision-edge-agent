@@ -31,12 +31,49 @@ Falha de uma camera nao derruba o processo inteiro.
 - `POST /api/v1/cameras/:id/health/`
 - `POST /api/edge/events/` (heartbeat)
 
+## Como o dono instala (passo a passo)
+1. Baixe o ZIP oficial e extraia.
+2. Abra `Start_DaleVision_Agent.bat` (nao use `run_once`).
+3. Se precisar de diagnostico, rode `Diagnose.bat` e envie o arquivo `logs/diagnostics-*.txt` via WhatsApp.
+
+## Comandos de suporte
+Diagnostico completo:
+```
+dalevision-edge-agent.exe doctor --share
+```
+
+Scan de NVRs na rede:
+```
+dalevision-edge-agent.exe scan --mode nvr --range auto
+```
+
+Teste RTSP Intelbras:
+```
+dalevision-edge-agent.exe test-rtsp --ip 192.168.1.10 --user admin --pass 1234 --channel 1 --subtype 1
+```
+
 ## Snapshot (opcional)
 O snapshot e opcional e nao deve quebrar o agente.
 - Primeiro tenta OpenCV (se empacotado).
 - Se nao houver OpenCV, tenta `ffmpeg` no PATH.
 - Se ambos falharem, loga e segue sem snapshot.
 Snapshots sao salvos em `cache/snapshots/<camera_id>/<timestamp>.jpg`.
+
+## Logs
+- Logs do agente em `%PROGRAMDATA%\\DaleVision\\EdgeAgent\\logs\\agent.log` (ou `logs/` se `PROGRAMDATA` nao existir).
+- Diagnosticos salvos em `%PROGRAMDATA%\\DaleVision\\EdgeAgent\\logs\\diagnostics-*.json` e `.txt`.
+
+## Rodar 24/7 (Windows)
+Instalar como tarefa agendada:
+```
+powershell -ExecutionPolicy Bypass -File install-service.ps1
+```
+
+## Auto-update (MVP)
+Configurar no `.env`:
+- `UPDATE_CHECK_URL`
+- `AUTO_UPDATE_ENABLED=1`
+- `UPDATE_INTERVAL_SECONDS=3600`
 
 ## Como cadastrar cameras no cloud e ver status no dashboard
 1. Cadastre as cameras da loja no backend cloud (vinculadas ao `STORE_ID`).
