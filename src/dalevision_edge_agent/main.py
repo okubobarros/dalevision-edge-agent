@@ -4,7 +4,9 @@ import argparse
 import importlib.metadata
 import logging
 from logging.handlers import RotatingFileHandler
+import os
 from pathlib import Path
+import sys
 import time
 from typing import Any
 
@@ -15,12 +17,18 @@ from .cameras import (
     build_rtsp_candidates,
     capture_snapshot_if_possible,
     check_camera_health,
+    detect_snapshot_support,
     fetch_cameras,
     fetch_roi,
+    mask_rtsp_url,
     send_camera_health_event,
 )
+from .diagnostics import run_doctor
 from .env import InvalidTokenError, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
+from .rtsp_test import test_rtsp
+from .scan import run_scan
+from .update import apply_update_if_possible, check_for_update, download_update
 
 BACKOFF_SECONDS = [2, 5, 10, 20, 30]
 LOG_MAX_BYTES = 2 * 1024 * 1024
@@ -33,6 +41,20 @@ EXIT_AUTH_ERROR = 3
 EXIT_NETWORK_ERROR = 4
 
 
+def _rollback_update_if_needed(updated_from: str, logger: logging.Logger) -> None:
+    backup = Path(sys.argv[0]).with_suffix(".exe.bak")
+    executable = Path(sys.argv[0])
+    if not backup.exists():
+        return
+    try:
+        if executable.exists():
+            executable.unlink(missing_ok=True)
+        backup.replace(executable)
+        logger.error("UPD050 rollback aplicado (from=%s)", updated_from)
+    except Exception as exc:
+        logger.error("UPD051 rollback falhou: %s", exc)
+
+
 def _setup_logging() -> logging.Logger:
     logger = logging.getLogger("dalevision-edge-agent")
     if logger.handlers:
@@ -41,7 +63,15 @@ def _setup_logging() -> logging.Logger:
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
-    log_dir = Path.cwd() / "logs"
+    log_root = os.getenv("DALE_LOG_DIR")
+    if log_root:
+        log_dir = Path(log_root)
+    else:
+        program_data = os.getenv("PROGRAMDATA")
+        if program_data:
+            log_dir = Path(program_data) / "DaleVision" / "EdgeAgent" / "logs"
+        else:
+            log_dir = Path.cwd() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "agent.log"
 
@@ -71,6 +101,45 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Send a single heartbeat and exit",
     )
+    parser.add_argument(
+        "--updated-from",
+        dest="updated_from",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser("run", help="Run edge agent")
+
+    diag_parser = subparsers.add_parser("diagnostics", help="Run network diagnostics")
+    diag_parser.add_argument(
+        "--nvr-ip",
+        dest="nvr_ip",
+        help="Optional NVR IP for segmentation check",
+    )
+    diag_parser.add_argument(
+        "--share",
+        action="store_true",
+        help="Generate a zip with logs and diagnostics",
+    )
+
+    doctor_parser = subparsers.add_parser("doctor", help="Run diagnostics (doctor)")
+    doctor_parser.add_argument("--nvr-ip", dest="nvr_ip", help="Optional NVR IP")
+    doctor_parser.add_argument("--share", action="store_true", help="Generate share ZIP")
+
+    scan_parser = subparsers.add_parser("scan", help="Scan local network for NVRs")
+    scan_parser.add_argument("--mode", default="nvr", choices=["nvr"])
+    scan_parser.add_argument("--range", default="auto", choices=["auto"])
+
+    rtsp_parser = subparsers.add_parser("test-rtsp", help="Test RTSP connection")
+    rtsp_parser.add_argument("--ip", required=True)
+    rtsp_parser.add_argument("--user", required=True)
+    rtsp_parser.add_argument("--pass", dest="password", required=True)
+    rtsp_parser.add_argument("--channel", type=int, default=1)
+    rtsp_parser.add_argument("--subtype", type=int, default=1)
+    rtsp_parser.add_argument("--timeout", type=int, default=5)
+
+    parser.set_defaults(command="run")
     return parser.parse_args()
 
 
@@ -137,17 +206,57 @@ def main() -> int:
     env_path = load_env_from_cwd()
     logger = _setup_logging()
 
+    if args.command in {"diagnostics", "doctor"}:
+        cloud_base_url = os.getenv("CLOUD_BASE_URL") or os.getenv("DALE_CLOUD_BASE_URL") or ""
+        run_doctor(
+            cloud_base_url=cloud_base_url,
+            logger=logger,
+            nvr_ip=args.nvr_ip,
+            share=bool(args.share),
+        )
+        return 0
+
+    if args.command == "scan":
+        results = run_scan(logger=logger)
+        print("Scan results:")
+        for item in results:
+            print(f"- {item['ip']} ports={item['ports']} confidence={item['confidence']}")
+        return 0
+
+    if args.command == "test-rtsp":
+        result = test_rtsp(
+            ip=args.ip,
+            user=args.user,
+            password=args.password,
+            channel=args.channel,
+            subtype=args.subtype,
+            timeout_seconds=args.timeout,
+            logger=logger,
+        )
+        if result.get("ok"):
+            latency = result.get("health", {}).get("latency_ms")
+            fps = result.get("fps")
+            print(f"✅ RTSP OK canal {args.channel}")
+            print(f"latency_ms={latency if latency is not None else 'N/A'} fps={fps if fps else 'N/A'}")
+        else:
+            print(f"❌ RTSP FAIL: {result.get('message')}")
+        return 0
+
     try:
         settings = load_settings()
     except InvalidTokenError as exc:
         message = f"ERRO: {exc}"
         print(message)
         logger.error(message)
+        if args.updated_from:
+            _rollback_update_if_needed(args.updated_from, logger)
         return EXIT_CONFIG_ERROR
     except ValueError as exc:
         message = f"ERRO: {exc}"
         print(message)
         logger.error(message)
+        if args.updated_from:
+            _rollback_update_if_needed(args.updated_from, logger)
         return 1
 
     print("Loaded env OK")
@@ -155,6 +264,17 @@ def main() -> int:
         "Loaded env OK (env_path=%s)",
         env_path if env_path.exists() else "not found",
     )
+    logger.info("Logs at %s", next(iter(logger.handlers)).baseFilename)
+
+    if args.updated_from:
+        backup = Path(sys.argv[0]).with_suffix(".exe.bak")
+        pending = Path.cwd() / "updates" / "pending.json"
+        if backup.exists():
+            backup.unlink(missing_ok=True)
+        if pending.exists():
+            pending.unlink(missing_ok=True)
+        logger.info("UPD040 update finalized from %s", args.updated_from)
+    detect_snapshot_support(logger)
 
     url = f"{settings.cloud_base_url}/api/edge/events/"
     version = _get_version()
@@ -172,6 +292,7 @@ def main() -> int:
     last_failure_status = None
     consecutive_auth_failures = 0
     last_camera_sync_at = 0.0
+    last_update_check_at = 0.0
     camera_states: dict[str, dict[str, Any]] = {}
     camera_auth_tracker = AuthFailureTracker(max_failures=MAX_CONSECUTIVE_AUTH_FAILURES)
     camera_sync_interval = max(
@@ -232,7 +353,7 @@ def main() -> int:
                     try:
                         candidates = build_rtsp_candidates(camera)
                         if not candidates:
-                            logger.warning("camera_id=%s no RTSP candidates", camera_id)
+                            logger.warning("CAMNF camera_id=%s no RTSP candidates", camera_id)
                         else:
                             logger.info(
                                 "camera_id=%s RTSP candidates=%s",
@@ -257,7 +378,7 @@ def main() -> int:
                                 logger.info(
                                     "camera_id=%s RTSP selected=%s",
                                     camera_id,
-                                    candidate,
+                                    mask_rtsp_url(candidate),
                                 )
                                 selected_rtsp_url = candidate
                                 break
@@ -265,17 +386,24 @@ def main() -> int:
                             selected_rtsp_url = candidates[-1]
                         if "snapshot_taken" not in health:
                             health["snapshot_taken"] = False
+                        if "snapshot_status" not in health:
+                            health["snapshot_status"] = "skip"
                         if selected_rtsp_url:
                             health["rtsp_url_used"] = selected_rtsp_url
-                            snapshot_path = capture_snapshot_if_possible(
+                            snapshot_result = capture_snapshot_if_possible(
                                 camera_id=camera_id,
                                 rtsp_url=selected_rtsp_url,
                                 logger=logger,
                             )
-                            if snapshot_path:
+                            health["snapshot_status"] = snapshot_result.get("snapshot_status")
+                            health["snapshot_local_path"] = snapshot_result.get(
+                                "snapshot_local_path"
+                            )
+                            if snapshot_result.get("snapshot_local_path"):
                                 health["snapshot_taken"] = True
-                                health["snapshot_local_path"] = snapshot_path
-                                health["snapshot_url"] = snapshot_path
+                                health["snapshot_url"] = snapshot_result.get(
+                                    "snapshot_local_path"
+                                )
                                 logger.info(
                                     "camera_id=%s snapshot ready (upload pending)",
                                     camera_id,
@@ -380,6 +508,24 @@ def main() -> int:
             consecutive_failures = 0
             last_failure_status = None
             consecutive_auth_failures = 0
+            now = time.time()
+            if now - last_update_check_at >= settings.update_interval_seconds:
+                update = check_for_update(
+                    logger=logger,
+                    current_version=version,
+                    update_check_url=settings.update_check_url,
+                    auto_update_enabled=settings.auto_update_enabled,
+                )
+                if update and update.get("auto_apply"):
+                    downloaded = download_update(logger=logger, update=update)
+                    if downloaded and apply_update_if_possible(
+                        logger=logger,
+                        current_version=version,
+                        update=update,
+                        downloaded_path=downloaded,
+                    ):
+                        return 0
+                last_update_check_at = now
             time.sleep(settings.heartbeat_interval_seconds)
             continue
 

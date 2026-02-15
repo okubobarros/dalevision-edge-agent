@@ -23,6 +23,7 @@ OPTIONAL_ENV = {
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
 DEFAULT_CAMERA_HEARTBEAT_INTERVAL_SECONDS = 30
 DEFAULT_MAX_ACTIVE_CAMERAS = 3
+DEFAULT_UPDATE_INTERVAL_SECONDS = 3600
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,9 @@ class Settings:
     camera_heartbeat_interval_seconds: int
     max_active_cameras: int
     rtsp_describe_enabled: bool
+    update_check_url: str
+    update_interval_seconds: int
+    auto_update_enabled: bool
 
 
 class InvalidTokenError(ValueError):
@@ -224,6 +228,12 @@ def load_settings() -> Settings:
         DEFAULT_MAX_ACTIVE_CAMERAS,
     )
     rtsp_describe_enabled = _parse_bool_env("RTSP_DESCRIBE_ENABLED", False)
+    update_interval_seconds = _parse_int_env(
+        "UPDATE_INTERVAL_SECONDS",
+        DEFAULT_UPDATE_INTERVAL_SECONDS,
+    )
+    auto_update_enabled = _parse_bool_env("AUTO_UPDATE_ENABLED", False)
+    update_check_url = _get_env_value("UPDATE_CHECK_URL", [], strip=True)
 
     if heartbeat_interval <= 0:
         raise ValueError("HEARTBEAT_INTERVAL_SECONDS must be > 0")
@@ -231,6 +241,8 @@ def load_settings() -> Settings:
         raise ValueError("CAMERA_HEARTBEAT_INTERVAL_SECONDS must be > 0")
     if max_active_cameras <= 0:
         raise ValueError("MAX_ACTIVE_CAMERAS must be > 0")
+    if update_interval_seconds <= 0:
+        raise ValueError("UPDATE_INTERVAL_SECONDS must be > 0")
 
     return Settings(
         cloud_base_url=_normalize_base_url(values["CLOUD_BASE_URL"]),
@@ -241,4 +253,7 @@ def load_settings() -> Settings:
         camera_heartbeat_interval_seconds=camera_heartbeat_interval,
         max_active_cameras=max_active_cameras,
         rtsp_describe_enabled=rtsp_describe_enabled,
+        update_check_url=update_check_url,
+        update_interval_seconds=update_interval_seconds,
+        auto_update_enabled=auto_update_enabled,
     )

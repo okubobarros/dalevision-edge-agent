@@ -75,6 +75,20 @@ def _extract_rtsp_url(camera: dict[str, Any]) -> str:
     return ""
 
 
+def mask_rtsp_url(rtsp_url: str) -> str:
+    if not rtsp_url:
+        return ""
+    parsed = urlparse(rtsp_url)
+    if parsed.username or parsed.password:
+        netloc = parsed.hostname or ""
+        if parsed.port:
+            netloc = f"{netloc}:{parsed.port}"
+        safe_user = parsed.username or "user"
+        netloc = f"{safe_user}:***@{netloc}"
+        return parsed._replace(netloc=netloc).geturl()
+    return rtsp_url
+
+
 def _extract_rtsp_credentials(camera: dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     username = camera.get("username") or camera.get("user") or camera.get("rtsp_user")
     password = camera.get("password") or camera.get("pass") or camera.get("rtsp_pass")
@@ -347,7 +361,17 @@ def check_camera_health(
                         "latency_ms": latency_ms,
                         "checked_at": checked_at,
                     }
-                if not response.startswith(b"RTSP/1.0"):
+                if response.startswith(b"RTSP/1.0"):
+                    first_line = response.split(b"\r\n", 1)[0].decode("ascii", errors="ignore")
+                    if " 401 " in first_line or " 403 " in first_line:
+                        return {
+                            "camera_id": camera_id,
+                            "status": "error",
+                            "error": "unauthorized",
+                            "latency_ms": latency_ms,
+                            "checked_at": checked_at,
+                        }
+                else:
                     return {
                         "camera_id": camera_id,
                         "status": "degraded",
@@ -409,6 +433,8 @@ def send_camera_health_event(
         payload["snapshot_taken"] = camera_health.get("snapshot_taken")
     if "snapshot_local_path" in camera_health:
         payload["snapshot_local_path"] = camera_health.get("snapshot_local_path")
+    if "snapshot_status" in camera_health:
+        payload["snapshot_status"] = camera_health.get("snapshot_status")
     response, status, error = _request_json_with_backoff(
         method="POST",
         url=url,
@@ -489,7 +515,37 @@ def _try_import_cv2():
 
 
 def _ffmpeg_path() -> Optional[str]:
-    return shutil.which("ffmpeg")
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    candidates = [
+        Path.cwd() / "ffmpeg.exe",
+        Path.cwd() / "bin" / "ffmpeg.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def detect_snapshot_support(logger: logging.Logger) -> dict[str, Optional[str]]:
+    cv2 = _try_import_cv2()
+    if cv2 is not None:
+        version = getattr(cv2, "__version__", "unknown")
+        logger.info("SNAPCV OpenCV disponível: sim (versao=%s)", version)
+        return {"opencv": "yes", "ffmpeg": _ffmpeg_path(), "opencv_version": str(version)}
+
+    logger.info("SNAPCV OpenCV disponível: nao")
+    ffmpeg = _ffmpeg_path()
+    if ffmpeg:
+        logger.info("SNAPFF ffmpeg disponível: sim (%s)", ffmpeg)
+        return {"opencv": "no", "ffmpeg": ffmpeg, "opencv_version": None}
+
+    logger.warning(
+        "SNAPNO Snapshot indisponivel. Instale ffmpeg e adicione ao PATH "
+        "ou use um pacote com OpenCV."
+    )
+    return {"opencv": "no", "ffmpeg": None, "opencv_version": None}
 
 
 def capture_snapshot_if_possible(
@@ -498,21 +554,24 @@ def capture_snapshot_if_possible(
     rtsp_url: str,
     logger: logging.Logger,
     timeout_seconds: int = 5,
-) -> Optional[str]:
+) -> dict[str, Optional[str]]:
     cv2 = _try_import_cv2()
     if cv2 is None:
         logger.info("[EDGE] OpenCV não disponível; tentando fallback ffmpeg")
         ffmpeg = _ffmpeg_path()
         if not ffmpeg:
-            logger.info("camera_id=%s snapshot skipped (ffmpeg not available)", camera_id)
-            return None
-        return _capture_snapshot_ffmpeg(
+            logger.info("SNAPNO camera_id=%s snapshot skipped (ffmpeg not available)", camera_id)
+            return {"snapshot_status": "skip", "snapshot_local_path": None}
+        result = _capture_snapshot_ffmpeg(
             camera_id=camera_id,
             rtsp_url=rtsp_url,
             logger=logger,
             timeout_seconds=timeout_seconds,
             ffmpeg_path=ffmpeg,
         )
+        if result is None:
+            return {"snapshot_status": "error", "snapshot_local_path": None}
+        return {"snapshot_status": "ok", "snapshot_local_path": result}
 
     snapshots_dir = Path.cwd() / "cache" / "snapshots"
     output_dir = snapshots_dir / camera_id
@@ -531,11 +590,11 @@ def capture_snapshot_if_possible(
     try:
         ok, frame = cap.read()
         if not ok or frame is None:
-            logger.info("camera_id=%s snapshot capture failed", camera_id)
-            return None
+            logger.info("SNAPERR camera_id=%s snapshot capture failed", camera_id)
+            return {"snapshot_status": "error", "snapshot_local_path": None}
         cv2.imwrite(str(output_path), frame)
         logger.info("camera_id=%s snapshot captured path=%s", camera_id, output_path)
-        return str(output_path)
+        return {"snapshot_status": "ok", "snapshot_local_path": str(output_path)}
     finally:
         cap.release()
 
@@ -575,16 +634,16 @@ def _capture_snapshot_ffmpeg(
             text=True,
         )
     except subprocess.TimeoutExpired:
-        logger.info("camera_id=%s snapshot ffmpeg timeout", camera_id)
+        logger.info("SNAPTO camera_id=%s snapshot ffmpeg timeout", camera_id)
         return None
     except OSError as exc:
-        logger.info("camera_id=%s snapshot ffmpeg error=%s", camera_id, exc)
+        logger.info("SNAPERR camera_id=%s snapshot ffmpeg error=%s", camera_id, exc)
         return None
 
     if result.returncode != 0 or not output_path.exists():
         stderr = (result.stderr or "").strip().splitlines()
         detail = stderr[-1] if stderr else "ffmpeg_failed"
-        logger.info("camera_id=%s snapshot ffmpeg failed: %s", camera_id, detail)
+        logger.info("SNAPERR camera_id=%s snapshot ffmpeg failed: %s", camera_id, detail)
         return None
 
     logger.info("camera_id=%s snapshot captured path=%s", camera_id, output_path)
