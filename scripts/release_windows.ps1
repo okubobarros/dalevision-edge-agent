@@ -27,6 +27,9 @@ Copy-Item .\dist\dalevision-edge-agent.exe .\release\win\dalevision-edge-agent.e
 Copy-Item .\release\README.txt .\release\win\README.txt -Force
 Copy-Item .\release\run.bat .\release\win\run.bat -Force
 Copy-Item .\release\run_once.bat .\release\win\run_once.bat -Force
+Copy-Item .\release\Start_DaleVision_Agent.bat .\release\win\Start_DaleVision_Agent.bat -Force
+Copy-Item .\release\Diagnose.bat .\release\win\Diagnose.bat -Force
+Copy-Item .\scripts\install-service.ps1 .\release\win\install-service.ps1 -Force
 
 # 3) criar .env placeholder (nunca .env real com segredos)
 Copy-Item .\release\.env.example .\release\win\.env -Force
@@ -40,7 +43,7 @@ if (Test-Path .\release\win\logs) {
 }
 
 # 5) validar arquivos obrigatórios
-$required = @("dalevision-edge-agent.exe", "run.bat", "run_once.bat", "README.txt", ".env")
+$required = @("dalevision-edge-agent.exe", "run.bat", "run_once.bat", "Start_DaleVision_Agent.bat", "Diagnose.bat", "README.txt", ".env")
 $missing = $required | Where-Object { -not (Test-Path (Join-Path .\release\win $_)) }
 if ($missing.Count -gt 0) {
   throw "Missing required files in release\\win: $($missing -join ', ')"
