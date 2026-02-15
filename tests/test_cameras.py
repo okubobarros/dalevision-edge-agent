@@ -103,7 +103,8 @@ class CamerasTests(unittest.TestCase):
             logger=logger,
         )
 
-        self.assertIsNone(result)
+        self.assertEqual("skip", result.get("snapshot_status"))
+        self.assertIsNone(result.get("snapshot_local_path"))
 
     @patch("dalevision_edge_agent.cameras.subprocess.run")
     @patch("dalevision_edge_agent.cameras._try_import_cv2")
@@ -125,7 +126,8 @@ class CamerasTests(unittest.TestCase):
             logger=logger,
         )
 
-        self.assertIsNone(result)
+        self.assertEqual("error", result.get("snapshot_status"))
+        self.assertIsNone(result.get("snapshot_local_path"))
 
 
 if __name__ == "__main__":

@@ -14,6 +14,11 @@ dependencies = [
   "pyyaml>=6.0.1",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4.0",
+]
+
 [project.scripts]
 dalevision-edge-agent = "dalevision_edge_agent.main:main"
 
