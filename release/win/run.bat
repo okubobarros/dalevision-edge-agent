@@ -4,6 +4,10 @@ cd /d "%~dp0"
 
 if not exist "logs" mkdir "logs" >nul 2>&1
 set "LOG_FILE=logs\stdout.log"
+set "AGENT_LOG_DIR=%CD%\logs"
+if not "%PROGRAMDATA%"=="" (
+  set "AGENT_LOG_DIR=%PROGRAMDATA%\DaleVision\EdgeAgent\logs"
+)
 echo [%DATE% %TIME%] START run.bat %* > "%LOG_FILE%"
 
 echo ===============================
@@ -89,8 +93,8 @@ echo Iniciando agente...
 >> "%LOG_FILE%" echo Iniciando agente...
 echo   - stdout/stderr: %CD%\logs\stdout.log
 >> "%LOG_FILE%" echo   - stdout/stderr: %CD%\logs\stdout.log
-echo   - agent log: %CD%\logs\agent.log
->> "%LOG_FILE%" echo   - agent log: %CD%\logs\agent.log
+echo   - agent log: %AGENT_LOG_DIR%\agent.log
+>> "%LOG_FILE%" echo   - agent log: %AGENT_LOG_DIR%\agent.log
 echo.
 >> "%LOG_FILE%" echo.
 
