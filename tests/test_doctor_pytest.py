@@ -6,7 +6,8 @@ import pytest
 
 from dalevision_edge_agent.diagnostics import _parse_ipconfig, run_doctor
 from dalevision_edge_agent.cameras import build_rtsp_candidates
-from dalevision_edge_agent.rtsp_test import _build_intelbras_rtsp
+from dalevision_edge_agent.rtsp_test import _build_intelbras_rtsp, _is_segmented
+from dalevision_edge_agent.cameras import mask_rtsp_url
 
 
 def test_parse_ipconfig_extracts_ipv4_and_gateway() -> None:
@@ -39,6 +40,24 @@ def test_doctor_generates_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert "summary" in payload
 
 
+def test_doctor_share_zip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run_cmd(command: str, timeout_seconds: int = 8) -> str:
+        if "ipconfig" in command:
+            return "IPv4 Address: 192.168.1.10\nSubnet Mask: 255.255.255.0\nDefault Gateway: 192.168.1.1"
+        return ""
+
+    monkeypatch.setattr("dalevision_edge_agent.diagnostics._run_cmd", fake_run_cmd)
+    monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
+
+    import logging
+
+    log = logging.getLogger("test")
+    payload = run_doctor(cloud_base_url="", logger=log, nvr_ip=None, share=True)
+    log_dir = Path(tmp_path) / "DaleVision" / "EdgeAgent" / "logs"
+    zip_files = list(log_dir.glob("diagnostics-share-*.zip"))
+    assert zip_files
+
+
 def test_build_rtsp_candidates_ip_camera() -> None:
     camera = {"ip": "10.0.0.10", "username": "user", "password": "pass"}
     candidates = build_rtsp_candidates(camera)
@@ -50,3 +69,17 @@ def test_intelbras_template() -> None:
     url = _build_intelbras_rtsp("192.168.1.10", "admin", "1234", 2, 1)
     assert "channel=2" in url
     assert "subtype=1" in url
+
+
+def test_mask_rtsp_url_hides_password() -> None:
+    masked = mask_rtsp_url("rtsp://admin:secret@192.168.1.10:554/stream")
+    assert "secret" not in masked
+    assert "admin" in masked
+
+
+def test_segmented_network_detects_different_subnet(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_run_cmd(command: str, timeout_seconds: int = 8) -> str:
+        return "IPv4 Address: 192.168.5.10\nSubnet Mask: 255.255.255.0\nDefault Gateway: 192.168.5.1"
+
+    monkeypatch.setattr("dalevision_edge_agent.rtsp_test._run_cmd", fake_run_cmd)
+    assert _is_segmented("192.168.15.20") is True
