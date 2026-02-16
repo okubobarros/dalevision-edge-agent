@@ -70,7 +70,7 @@ def _setup_logging() -> logging.Logger:
     else:
         program_data = os.getenv("PROGRAMDATA")
         if program_data:
-            log_dir = Path(program_data) / "DaleVision" / "EdgeAgent" / "logs"
+            log_dir = Path(program_data) / "DaleVision" / "logs"
         else:
             log_dir = Path.cwd() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -162,20 +162,23 @@ def _run_once(
     )
 
     if status is None:
-        message = f"ERRO: Falha de conexao/timeout: {error or 'erro desconhecido'}"
+        message = f"⚠️ Sem internet ou timeout: {error or 'erro desconhecido'}"
         print(message)
+        print("Proximo passo: verifique internet e tente novamente.")
         logger.error("Heartbeat -> %s status=ERROR error=%s", url, error)
         return EXIT_NETWORK_ERROR
 
     print(f"Heartbeat -> {url} status={status}")
 
     if ok and status == 201:
+        print("✅ Conectado. Volte ao site e clique em 'Adicionar câmera'.")
         logger.info("Heartbeat -> %s status=%s", url, status)
         return 0
 
     if status in AUTH_FAILURE_STATUSES:
-        message = f"HTTP {status} - Token inválido/expirado"
+        message = f"❌ Token inválido/expirado (HTTP {status})"
         print(message)
+        print("Proximo passo: gere um novo token no Wizard e atualize o .env.")
         logger.error(
             "Auth rejected by backend (status=%s, store_id=%s, cloud_base_url=%s): %s",
             status,
@@ -186,8 +189,9 @@ def _run_once(
         return EXIT_AUTH_ERROR
 
     detail = error or f"HTTP {status}"
-    message = f"ERRO: Heartbeat falhou: {detail}"
+    message = f"❌ Falha ao conectar: {detail}"
     print(message)
+    print("Proximo passo: verifique internet e o CLOUD_BASE_URL.")
     logger.error(
         "Heartbeat failed once (status=%s, error=%s)",
         status,
@@ -210,16 +214,16 @@ def main() -> int:
 
     if len(sys.argv) == 1:
         print("DALE Vision Edge Agent")
-        print("1) Iniciar agente")
-        print("2) Testar conexao e gerar diagnostico")
+        print("1) Conectar (Teste rapido)")
+        print("2) Iniciar monitoramento (rodar sempre)")
         print("3) Instalar como servico (requer admin)")
         print("4) Abrir dashboard")
         choice = input("Escolha uma opcao (1-4): ").strip()
         if choice == "1":
             args.command = "run"
+            args.once = True
         elif choice == "2":
-            args.command = "doctor"
-            args.share = True
+            args.command = "run"
         elif choice == "3":
             args.command = "install-service"
         elif choice == "4":

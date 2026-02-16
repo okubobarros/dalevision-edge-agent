@@ -379,5 +379,5 @@ def _log_dir() -> Path:
         return Path(log_root)
     program_data = os.getenv("PROGRAMDATA")
     if program_data:
-        return Path(program_data) / "DaleVision" / "EdgeAgent" / "logs"
+        return Path(program_data) / "DaleVision" / "logs"
     return Path.cwd() / "logs"
