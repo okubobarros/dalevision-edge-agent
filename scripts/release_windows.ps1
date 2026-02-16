@@ -7,13 +7,17 @@ $ErrorActionPreference = "Stop"
 # garantir template de .env placeholder (sem segredos)
 $envTemplatePath = ".\\release\\.env.example"
 if (-not (Test-Path $envTemplatePath)) {
-  $envTemplateContent = @'
+$envTemplateContent = @'
 CLOUD_BASE_URL=https://api.dalevision.com
 STORE_ID=
 EDGE_TOKEN=
 AGENT_ID=edge-001
 HEARTBEAT_INTERVAL_SECONDS=30
 CAMERA_HEARTBEAT_INTERVAL_SECONDS=30
+DASHBOARD_URL=https://app.dalevision.com/app/cameras?onboarding=true
+ENABLE_AUTO_UPDATE=0
+UPDATE_CHECK_URL=
+UPDATE_INTERVAL_SECONDS=21600
 '@
   Set-Content -Path $envTemplatePath -Value $envTemplateContent
 }
@@ -25,10 +29,9 @@ New-Item -ItemType Directory -Path .\release\win | Out-Null
 # 2) copiar artefatos obrigatórios
 Copy-Item .\dist\dalevision-edge-agent.exe .\release\win\dalevision-edge-agent.exe -Force
 Copy-Item .\release\README.txt .\release\win\README.txt -Force
-Copy-Item .\release\run.bat .\release\win\run.bat -Force
-Copy-Item .\release\run_once.bat .\release\win\run_once.bat -Force
-Copy-Item .\release\Start_DaleVision_Agent.bat .\release\win\Start_DaleVision_Agent.bat -Force
-Copy-Item .\release\Diagnose.bat .\release\win\Diagnose.bat -Force
+Copy-Item .\release\01_Iniciar_DaleVision.bat .\release\win\01_Iniciar_DaleVision.bat -Force
+Copy-Item .\release\02_Testar_Conexao.bat .\release\win\02_Testar_Conexao.bat -Force
+Copy-Item .\release\03_Instalar_Como_Servico.bat .\release\win\03_Instalar_Como_Servico.bat -Force
 Copy-Item .\scripts\install-service.ps1 .\release\win\install-service.ps1 -Force
 
 # 3) criar .env placeholder (nunca .env real com segredos)
@@ -43,7 +46,14 @@ if (Test-Path .\release\win\logs) {
 }
 
 # 5) validar arquivos obrigatórios
-$required = @("dalevision-edge-agent.exe", "run.bat", "run_once.bat", "Start_DaleVision_Agent.bat", "Diagnose.bat", "README.txt", ".env")
+$required = @(
+  "dalevision-edge-agent.exe",
+  "01_Iniciar_DaleVision.bat",
+  "02_Testar_Conexao.bat",
+  "03_Instalar_Como_Servico.bat",
+  "README.txt",
+  ".env"
+)
 $missing = $required | Where-Object { -not (Test-Path (Join-Path .\release\win $_)) }
 if ($missing.Count -gt 0) {
   throw "Missing required files in release\\win: $($missing -join ', ')"

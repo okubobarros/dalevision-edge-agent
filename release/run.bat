@@ -8,6 +8,7 @@ set "AGENT_LOG_DIR=%CD%\logs"
 if not "%PROGRAMDATA%"=="" (
   set "AGENT_LOG_DIR=%PROGRAMDATA%\DaleVision\EdgeAgent\logs"
 )
+set "DALE_LOG_DIR=%AGENT_LOG_DIR%"
 echo [%DATE% %TIME%] START run.bat %* > "%LOG_FILE%"
 
 echo ===============================
