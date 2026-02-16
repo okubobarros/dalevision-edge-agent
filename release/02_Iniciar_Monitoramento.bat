@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ==========================================
-echo 01 - Iniciar DALE Vision
+echo 2) Iniciar monitoramento (rodar sempre)
 echo ==========================================
 echo.
 
@@ -16,7 +16,7 @@ if not exist ".env" (
 
 set "DALE_LOG_DIR=%CD%\logs"
 if not "%PROGRAMDATA%"=="" (
-  set "DALE_LOG_DIR=%PROGRAMDATA%\DaleVision\EdgeAgent\logs"
+  set "DALE_LOG_DIR=%PROGRAMDATA%\DaleVision\logs"
 )
 set "DASH_URL=https://app.dalevision.com/app/cameras?onboarding=true"
 for /f "usebackq tokens=1,* delims==" %%A in (".env") do (

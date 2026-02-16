@@ -6,7 +6,7 @@ if not exist "logs" mkdir "logs" >nul 2>&1
 set "LOG_FILE=logs\stdout.log"
 set "AGENT_LOG_DIR=%CD%\logs"
 if not "%PROGRAMDATA%"=="" (
-  set "AGENT_LOG_DIR=%PROGRAMDATA%\DaleVision\EdgeAgent\logs"
+  set "AGENT_LOG_DIR=%PROGRAMDATA%\DaleVision\logs"
 )
 set "DALE_LOG_DIR=%AGENT_LOG_DIR%"
 echo [%DATE% %TIME%] START run.bat %* > "%LOG_FILE%"

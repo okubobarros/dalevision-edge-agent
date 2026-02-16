@@ -29,9 +29,9 @@ New-Item -ItemType Directory -Path .\release\win | Out-Null
 # 2) copiar artefatos obrigatórios
 Copy-Item .\dist\dalevision-edge-agent.exe .\release\win\dalevision-edge-agent.exe -Force
 Copy-Item .\release\README.txt .\release\win\README.txt -Force
-Copy-Item .\release\01_Iniciar_DaleVision.bat .\release\win\01_Iniciar_DaleVision.bat -Force
-Copy-Item .\release\02_Testar_Conexao.bat .\release\win\02_Testar_Conexao.bat -Force
-Copy-Item .\release\03_Instalar_Como_Servico.bat .\release\win\03_Instalar_Como_Servico.bat -Force
+Copy-Item .\release\01_Teste_Rapido.bat .\release\win\01_Teste_Rapido.bat -Force
+Copy-Item .\release\02_Iniciar_Monitoramento.bat .\release\win\02_Iniciar_Monitoramento.bat -Force
+Copy-Item .\release\99_Gerar_Diagnostico_para_Suporte.bat .\release\win\99_Gerar_Diagnostico_para_Suporte.bat -Force
 Copy-Item .\scripts\install-service.ps1 .\release\win\install-service.ps1 -Force
 
 # 3) criar .env placeholder (nunca .env real com segredos)
@@ -48,9 +48,9 @@ if (Test-Path .\release\win\logs) {
 # 5) validar arquivos obrigatórios
 $required = @(
   "dalevision-edge-agent.exe",
-  "01_Iniciar_DaleVision.bat",
-  "02_Testar_Conexao.bat",
-  "03_Instalar_Como_Servico.bat",
+  "01_Teste_Rapido.bat",
+  "02_Iniciar_Monitoramento.bat",
+  "99_Gerar_Diagnostico_para_Suporte.bat",
   "README.txt",
   ".env"
 )
