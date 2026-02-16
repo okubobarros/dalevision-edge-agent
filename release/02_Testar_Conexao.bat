@@ -15,6 +15,16 @@ for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
 )
 echo Rodando diagnostico...
 dalevision-edge-agent.exe doctor --share
+for /f "delims=" %%Z in ('dir /b /o-d "%DALE_LOG_DIR%\diagnostics-share-*.zip" 2^>nul') do (
+  set "LAST_ZIP=%%Z"
+  goto foundzip
+)
+:foundzip
+if not "%LAST_ZIP%"=="" (
+  if not "%USERPROFILE%"=="" (
+    copy "%DALE_LOG_DIR%\%LAST_ZIP%" "%USERPROFILE%\Desktop\%LAST_ZIP%" >nul 2>&1
+  )
+)
 echo.
 echo Agora vamos buscar NVRs na rede...
 dalevision-edge-agent.exe scan --mode nvr --range auto
