@@ -33,8 +33,8 @@ Falha de uma camera nao derruba o processo inteiro.
 
 ## Como o dono instala (passo a passo)
 1. Baixe o ZIP oficial e extraia.
-2. Abra `Start_DaleVision_Agent.bat` (nao use `run_once`).
-3. Se precisar de diagnostico, rode `Diagnose.bat` e envie o arquivo `logs/diagnostics-*.txt` via WhatsApp.
+2. Clique em `01_Iniciar_DaleVision.bat` (ou rode o `dalevision-edge-agent.exe` e escolha a opcao 1).
+3. Se precisar de diagnostico, rode `02_Testar_Conexao.bat` (ou opcao 2 no exe) e envie o ZIP de diagnostico via WhatsApp.
 
 ## Comandos de suporte
 Diagnostico completo:
@@ -50,6 +50,7 @@ dalevision-edge-agent.exe scan --mode nvr --range auto
 Teste RTSP Intelbras:
 ```
 dalevision-edge-agent.exe test-rtsp --ip 192.168.1.10 --user admin --pass 1234 --channel 1 --subtype 1
+dalevision-edge-agent.exe test-rtsp --ip 192.168.1.10 --user admin --pass 1234 --scan-channels
 ```
 
 ## Snapshot (opcional)
@@ -72,8 +73,8 @@ powershell -ExecutionPolicy Bypass -File install-service.ps1
 ## Auto-update (MVP)
 Configurar no `.env`:
 - `UPDATE_CHECK_URL`
-- `AUTO_UPDATE_ENABLED=1`
-- `UPDATE_INTERVAL_SECONDS=3600`
+- `ENABLE_AUTO_UPDATE=1`
+- `UPDATE_INTERVAL_SECONDS=21600`
 
 ## Como cadastrar cameras no cloud e ver status no dashboard
 1. Cadastre as cameras da loja no backend cloud (vinculadas ao `STORE_ID`).
