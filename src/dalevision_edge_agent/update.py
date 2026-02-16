@@ -92,7 +92,7 @@ def download_update(
         return None
     updates_dir = Path.cwd() / "updates"
     updates_dir.mkdir(parents=True, exist_ok=True)
-    target = updates_dir / f"update-{update['version']}.exe"
+    target = updates_dir / f"update-{update['version']}"
     try:
         with requests.get(url, stream=True, timeout=15) as response:
             response.raise_for_status()
@@ -112,8 +112,24 @@ def download_update(
             target.unlink(missing_ok=True)
             return None
 
-    logger.info("UPD022 download ok: %s", target)
-    return target
+    if url.lower().endswith(".zip"):
+        import zipfile
+
+        extract_dir = updates_dir / f"update-{update['version']}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(target, "r") as zf:
+            zf.extractall(extract_dir)
+        exe_candidates = list(extract_dir.rglob("*.exe"))
+        if not exe_candidates:
+            logger.info("UPD022 zip sem exe")
+            return None
+        logger.info("UPD022 download ok: %s", exe_candidates[0])
+        return exe_candidates[0]
+
+    exe_target = target.with_suffix(".exe")
+    target.rename(exe_target)
+    logger.info("UPD022 download ok: %s", exe_target)
+    return exe_target
 
 
 def apply_update_if_possible(

@@ -23,7 +23,7 @@ OPTIONAL_ENV = {
 DEFAULT_HEARTBEAT_INTERVAL_SECONDS = 30
 DEFAULT_CAMERA_HEARTBEAT_INTERVAL_SECONDS = 30
 DEFAULT_MAX_ACTIVE_CAMERAS = 3
-DEFAULT_UPDATE_INTERVAL_SECONDS = 3600
+DEFAULT_UPDATE_INTERVAL_SECONDS = 21600
 
 
 @dataclass(frozen=True)
@@ -232,7 +232,10 @@ def load_settings() -> Settings:
         "UPDATE_INTERVAL_SECONDS",
         DEFAULT_UPDATE_INTERVAL_SECONDS,
     )
-    auto_update_enabled = _parse_bool_env("AUTO_UPDATE_ENABLED", False)
+    auto_update_enabled = _parse_bool_env("AUTO_UPDATE_ENABLED", False) or _parse_bool_env(
+        "ENABLE_AUTO_UPDATE",
+        False,
+    )
     update_check_url = _get_env_value("UPDATE_CHECK_URL", [], strip=True)
 
     if heartbeat_interval <= 0:

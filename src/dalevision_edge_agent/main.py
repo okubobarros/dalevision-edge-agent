@@ -6,6 +6,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 from typing import Any
@@ -26,7 +27,7 @@ from .cameras import (
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
-from .rtsp_test import test_rtsp
+from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import run_scan
 from .update import apply_update_if_possible, check_for_update, download_update
 
@@ -138,6 +139,7 @@ def _parse_args() -> argparse.Namespace:
     rtsp_parser.add_argument("--channel", type=int, default=1)
     rtsp_parser.add_argument("--subtype", type=int, default=1)
     rtsp_parser.add_argument("--timeout", type=int, default=5)
+    rtsp_parser.add_argument("--scan-channels", action="store_true")
 
     parser.set_defaults(command="run")
     return parser.parse_args()
@@ -206,6 +208,31 @@ def main() -> int:
     env_path = load_env_from_cwd()
     logger = _setup_logging()
 
+    if len(sys.argv) == 1:
+        print("DALE Vision Edge Agent")
+        print("1) Iniciar agente")
+        print("2) Testar conexao e gerar diagnostico")
+        print("3) Instalar como servico (requer admin)")
+        print("4) Abrir dashboard")
+        choice = input("Escolha uma opcao (1-4): ").strip()
+        if choice == "1":
+            args.command = "run"
+        elif choice == "2":
+            args.command = "doctor"
+            args.share = True
+        elif choice == "3":
+            args.command = "install-service"
+        elif choice == "4":
+            try:
+                url = os.getenv("DASHBOARD_URL") or "https://app.dalevision.com/app/cameras?onboarding=true"
+                os.startfile(url)
+            except Exception:
+                print("Nao foi possivel abrir o navegador.")
+            return 0
+        else:
+            print("Opcao invalida.")
+            return 1
+
     if args.command in {"diagnostics", "doctor"}:
         cloud_base_url = os.getenv("CLOUD_BASE_URL") or os.getenv("DALE_CLOUD_BASE_URL") or ""
         run_doctor(
@@ -216,6 +243,22 @@ def main() -> int:
         )
         return 0
 
+    if args.command == "install-service":
+        script_path = Path.cwd() / "install-service.ps1"
+        if not script_path.exists():
+            print("Arquivo install-service.ps1 nao encontrado.")
+            return 1
+        result = subprocess.run(
+            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script_path)],
+            capture_output=True,
+            text=True,
+        )
+        print(result.stdout.strip())
+        if result.returncode != 0:
+            print(result.stderr.strip())
+            return 1
+        return 0
+
     if args.command == "scan":
         results = run_scan(logger=logger)
         print("Scan results:")
@@ -224,22 +267,37 @@ def main() -> int:
         return 0
 
     if args.command == "test-rtsp":
-        result = test_rtsp(
-            ip=args.ip,
-            user=args.user,
-            password=args.password,
-            channel=args.channel,
-            subtype=args.subtype,
-            timeout_seconds=args.timeout,
-            logger=logger,
-        )
-        if result.get("ok"):
-            latency = result.get("health", {}).get("latency_ms")
-            fps = result.get("fps")
-            print(f"✅ RTSP OK canal {args.channel}")
-            print(f"latency_ms={latency if latency is not None else 'N/A'} fps={fps if fps else 'N/A'}")
+        if args.scan_channels:
+            result = test_rtsp_channels(
+                ip=args.ip,
+                user=args.user,
+                password=args.password,
+                channels=list(range(1, 17)),
+                subtype=args.subtype,
+                timeout_seconds=args.timeout,
+                logger=logger,
+            )
+            print("Resultados por canal:")
+            for item in result["results"]:
+                status = "OK" if item["ok"] else "FAIL"
+                print(f"- canal {item['channel']}: {status} {item.get('message') or ''}".strip())
         else:
-            print(f"❌ RTSP FAIL: {result.get('message')}")
+            result = test_rtsp(
+                ip=args.ip,
+                user=args.user,
+                password=args.password,
+                channel=args.channel,
+                subtype=args.subtype,
+                timeout_seconds=args.timeout,
+                logger=logger,
+            )
+            if result.get("ok"):
+                latency = result.get("health", {}).get("latency_ms")
+                fps = result.get("fps")
+                print(f"✅ RTSP OK canal {args.channel}")
+                print(f"latency_ms={latency if latency is not None else 'N/A'} fps={fps if fps else 'N/A'}")
+            else:
+                print(f"❌ RTSP FAIL: {result.get('message')}")
         return 0
 
     try:
@@ -517,14 +575,19 @@ def main() -> int:
                     auto_update_enabled=settings.auto_update_enabled,
                 )
                 if update and update.get("auto_apply"):
+                    service_mode = os.getenv("SERVICE_MODE") or os.getenv("DALE_SERVICE_MODE")
                     downloaded = download_update(logger=logger, update=update)
-                    if downloaded and apply_update_if_possible(
-                        logger=logger,
-                        current_version=version,
-                        update=update,
-                        downloaded_path=downloaded,
-                    ):
-                        return 0
+                    if downloaded:
+                        if service_mode:
+                            logger.info("UPD012 update scheduled (service mode)")
+                        else:
+                            if apply_update_if_possible(
+                                logger=logger,
+                                current_version=version,
+                                update=update,
+                                downloaded_path=downloaded,
+                            ):
+                                return 0
                 last_update_check_at = now
             time.sleep(settings.heartbeat_interval_seconds)
             continue

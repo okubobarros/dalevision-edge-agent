@@ -16,6 +16,8 @@ from typing import Any, Optional
 import requests
 from .cameras import detect_snapshot_support
 
+NVR_PORTS = (80, 443, 554, 37777)
+
 DIAGNOSTIC_TIMEOUT_SECONDS = 8
 
 
@@ -134,6 +136,17 @@ def _api_check(cloud_base_url: str, logger: logging.Logger) -> dict[str, Any]:
     except requests.RequestException as exc:
         logger.info("NETAPI cloud_base_url=%s error=%s", cloud_base_url, exc)
         return {"ok": False, "error": str(exc)}
+
+
+def _check_ports(ip: str, ports: tuple[int, ...]) -> list[int]:
+    open_ports = []
+    for port in ports:
+        try:
+            with socket.create_connection((ip, port), timeout=1):
+                open_ports.append(port)
+        except OSError:
+            continue
+    return open_ports
 
 
 def _dns_check() -> dict[str, Any]:
@@ -255,6 +268,17 @@ def run_doctor(
         except Exception:
             network_segmented = False
 
+    nvr_ports = _check_ports(nvr_ip, NVR_PORTS) if nvr_ip else []
+    suggested_actions: list[str] = []
+    if not gateway:
+        suggested_actions.append("NET001 Verifique o cabo/rede. Sem gateway padrao.")
+    if network_segmented:
+        suggested_actions.append(
+            "NET002 Conecte o PC na mesma rede/VLAN do NVR (ex.: 192.168.15.x)."
+        )
+    if nvr_ip and 554 not in nvr_ports:
+        suggested_actions.append("RTSP554 Porta 554 fechada no NVR.")
+
     summary = _summarize(
         ipv4=ipv4,
         mask=mask,
@@ -271,20 +295,19 @@ def run_doctor(
         permissions_ok=bool(permissions_check.get("ok")),
         internet_ok=bool(internet_check.get("ok")),
     )
-        snapshot_ok=bool(snapshot_support.get("ffmpeg")) or snapshot_support.get("opencv") == "yes",
-        permissions_ok=bool(permissions_check.get("ok")),
-    )
 
     diagnostics_id = datetime.now().strftime("%Y%m%d-%H%M%S")
     payload = {
         "ts": _utc_timestamp(),
         "id": diagnostics_id,
         "cloud_base_url": cloud_base_url,
-        "local_ipv4": ipv4,
-        "local_mask": mask,
-        "local_cidr": local_cidr,
-        "gateway": gateway,
-        "dns_servers": dns_servers,
+        "network_info": {
+            "local_ipv4": ipv4,
+            "local_mask": mask,
+            "local_cidr": local_cidr,
+            "gateway": gateway,
+            "dns_servers": dns_servers,
+        },
         "gateway_ping_ms": ping_ms,
         "nvr_ip": nvr_ip,
         "network_segmented": network_segmented,
@@ -295,6 +318,10 @@ def run_doctor(
         "disk_check": disk_check,
         "permissions_check": permissions_check,
         "scan_results": [],
+        "nvrs_found": [],
+        "ports": {"nvr": nvr_ports},
+        "rtsp_test_results": [],
+        "suggested_actions": suggested_actions,
         "commands": {
             "ipconfig": ipconfig_text,
             "route_print": route_text,

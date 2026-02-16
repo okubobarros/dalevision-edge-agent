@@ -97,3 +97,32 @@ def test_rtsp(
     }
     logger.info("RTSPTEST ok: canal %s", channel)
     return result
+
+
+def test_rtsp_channels(
+    *,
+    ip: str,
+    user: str,
+    password: str,
+    channels: list[int],
+    subtype: int,
+    timeout_seconds: int,
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    results = []
+    for channel in channels:
+        result = test_rtsp(
+            ip=ip,
+            user=user,
+            password=password,
+            channel=channel,
+            subtype=subtype,
+            timeout_seconds=timeout_seconds,
+            logger=logger,
+        )
+        results.append({"channel": channel, "ok": result.get("ok"), "message": result.get("message")})
+        if result.get("ok"):
+            break
+        if result.get("message") == "RTSP401 credencial invalida":
+            break
+    return {"results": results}
