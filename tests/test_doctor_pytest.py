@@ -53,7 +53,7 @@ def test_doctor_share_zip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 
     log = logging.getLogger("test")
     payload = run_doctor(cloud_base_url="", logger=log, nvr_ip=None, share=True)
-    log_dir = Path(tmp_path) / "DaleVision" / "EdgeAgent" / "logs"
+    log_dir = Path(tmp_path) / "DaleVision" / "logs"
     zip_files = list(log_dir.glob("diagnostics-share-*.zip"))
     assert zip_files
 

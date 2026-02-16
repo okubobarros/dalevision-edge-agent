@@ -33,8 +33,9 @@ Falha de uma camera nao derruba o processo inteiro.
 
 ## Como o dono instala (passo a passo)
 1. Baixe o ZIP oficial e extraia.
-2. Clique em `01_Iniciar_DaleVision.bat` (ou rode o `dalevision-edge-agent.exe` e escolha a opcao 1).
-3. Se precisar de diagnostico, rode `02_Testar_Conexao.bat` (ou opcao 2 no exe) e envie o ZIP de diagnostico via WhatsApp.
+2. Clique em `01_Teste_Rapido.bat` (ou rode o `dalevision-edge-agent.exe` e escolha a opcao 1).
+3. Se aparecer “✅ Conectado”, clique em `02_Iniciar_Monitoramento.bat`.
+4. Se precisar de diagnostico, rode `99_Gerar_Diagnostico_para_Suporte.bat` e envie o ZIP via WhatsApp.
 
 ## Comandos de suporte
 Diagnostico completo:
