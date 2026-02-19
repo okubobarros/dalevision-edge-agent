@@ -1,7 +1,7 @@
 DALE Vision — Edge Agent (Windows)
 
 PASSO 1 — Preencher o .env
-Substitua o arquivo .env pelo .env enviado pelo suporte.
+Preencha o arquivo .env (template) com os dados do suporte.
 
 PASSO 2 — Iniciar
 Execute: Start_DaleVision_Agent.bat
@@ -12,7 +12,9 @@ Execute: Diagnose.bat
 Envie o ZIP gerado para o suporte.
 
 AVANCADO (OPCIONAL)
-Testar_Conexao.bat: teste rapido.
+01 - Iniciar Agent.bat: entrada principal (alias).
+02 - Teste rápido (run once).bat: teste rapido.
+03 - Diagnóstico (gerar ZIP).bat: suporte.
 install-service.ps1: instalar como servico (requer Administrador).
 run.bat e run_once.bat: compatibilidade/avancado.
 

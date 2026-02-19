@@ -14,6 +14,11 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 if ([string]::IsNullOrWhiteSpace($InstallDir)) {
   $InstallDir = $PSScriptRoot
+  $fallback = Join-Path $PSScriptRoot "..\\release\\win"
+  $agentBat = Join-Path $InstallDir "Start_DaleVision_Agent.bat"
+  if (-not (Test-Path $agentBat) -and (Test-Path $fallback)) {
+    $InstallDir = (Resolve-Path $fallback).Path
+  }
 }
 
 $agentBat = Join-Path $InstallDir "Start_DaleVision_Agent.bat"

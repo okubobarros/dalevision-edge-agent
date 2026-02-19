@@ -2,6 +2,8 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
+set "EXE_NAME=DaleVision Edge Agent.exe"
+
 echo ==========================================
 echo DALE Vision Edge Agent - Iniciar
 echo ==========================================
@@ -10,6 +12,13 @@ echo.
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado.
   echo Abra o README.txt e preencha o .env.
+  pause
+  exit /b 2
+)
+
+if not exist "%EXE_NAME%" (
+  echo ERRO: executavel nao encontrado: %EXE_NAME%
+  echo Verifique se o ZIP foi extraido corretamente.
   pause
   exit /b 2
 )
@@ -24,13 +33,13 @@ echo Deixe esta janela aberta.
 echo.
 
 start "" "%DASH_URL%"
-dalevision-edge-agent.exe
+"%EXE_NAME%"
 set "exit_code=%errorlevel%"
 
 echo.
 if not "%exit_code%"=="0" (
   echo O agente foi encerrado com erro.
-  echo Rode Diagnose.bat e envie o ZIP para o suporte.
+  echo Rode "03 - Diagnostico (gerar ZIP).bat" e envie o ZIP para o suporte.
 ) else (
   echo O agente foi encerrado.
 )
