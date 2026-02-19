@@ -1,16 +1,20 @@
 DALE Vision — Edge Agent (Windows)
 
-EM 10 SEGUNDOS
-1) Substitua o arquivo .env pelo .env enviado pelo suporte.
-2) Execute: Start_DaleVision_Agent.bat
-3) No app, clique em "Adicionar camera".
+PASSO 1 — Preencher o .env
+Substitua o arquivo .env pelo .env enviado pelo suporte.
 
-SE QUISER TESTAR ANTES (OPCIONAL)
-Execute: Testar_Conexao.bat
+PASSO 2 — Iniciar
+Execute: Start_DaleVision_Agent.bat
+No app, clique em "Adicionar camera".
 
 SE DER ERRO
-1) Execute: Diagnose.bat
-2) Envie o ZIP gerado para o suporte.
+Execute: Diagnose.bat
+Envie o ZIP gerado para o suporte.
+
+AVANCADO (OPCIONAL)
+Testar_Conexao.bat: teste rapido.
+install-service.ps1: instalar como servico (requer Administrador).
+run.bat e run_once.bat: compatibilidade/avancado.
 
 ALERTA DO WINDOWS (SmartScreen)
 Se aparecer "Windows protegeu seu PC":

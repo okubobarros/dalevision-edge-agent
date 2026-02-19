@@ -648,4 +648,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except KeyboardInterrupt:
+        print("Encerrado pelo usuario.")
+        raise SystemExit(0)
