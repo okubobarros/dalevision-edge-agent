@@ -27,13 +27,13 @@ Remove-Item -Recurse -Force .\release\win -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path .\release\win | Out-Null
 
 # 2) copiar artefatos obrigatórios
-Copy-Item .\dist\dalevision-edge-agent.exe .\release\win\dalevision-edge-agent.exe -Force
+Copy-Item .\dist\dalevision-edge-agent.exe .\release\win\"DaleVision Edge Agent.exe" -Force
 # Opcional (se houver pipeline de assinatura): assinar o exe aqui antes do zip.
 Copy-Item .\release\README.txt .\release\win\README.txt -Force
-Copy-Item .\release\Testar_Conexao.bat .\release\win\Testar_Conexao.bat -Force
-Copy-Item .\release\Start_DaleVision_Agent.bat .\release\win\Start_DaleVision_Agent.bat -Force
-Copy-Item .\release\Diagnose.bat .\release\win\Diagnose.bat -Force
-Copy-Item .\scripts\install-service.ps1 .\release\win\install-service.ps1 -Force
+Copy-Item ".\\release\\01 - Iniciar Agent.bat" ".\\release\\win\\01 - Iniciar Agent.bat" -Force
+Copy-Item ".\\release\\02 - Teste rápido (run once).bat" ".\\release\\win\\02 - Teste rápido (run once).bat" -Force
+Copy-Item ".\\release\\03 - Diagnóstico (gerar ZIP).bat" ".\\release\\win\\03 - Diagnóstico (gerar ZIP).bat" -Force
+Copy-Item .\scripts\install-service.ps1 ".\\release\\win\\04 - Instalar como Serviço (Admin).ps1" -Force
 
 # 3) criar .env placeholder (nunca .env real com segredos)
 Copy-Item .\release\.env.example .\release\win\.env -Force
@@ -48,10 +48,11 @@ if (Test-Path .\release\win\logs) {
 
 # 5) validar arquivos obrigatórios
 $required = @(
-  "dalevision-edge-agent.exe",
-  "Start_DaleVision_Agent.bat",
-  "Testar_Conexao.bat",
-  "Diagnose.bat",
+  "DaleVision Edge Agent.exe",
+  "01 - Iniciar Agent.bat",
+  "02 - Teste rápido (run once).bat",
+  "03 - Diagnóstico (gerar ZIP).bat",
+  "04 - Instalar como Serviço (Admin).ps1",
   "README.txt",
   ".env"
 )
@@ -66,6 +67,6 @@ Remove-Item .\$zipName -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path .\release\win\* -DestinationPath .\$zipName
 
 # 7) sanity check
-python -c "import zipfile; z=zipfile.ZipFile('$zipName'); names=[i.filename for i in z.infolist()]; required={'dalevision-edge-agent.exe','Start_DaleVision_Agent.bat','Testar_Conexao.bat','Diagnose.bat','README.txt','.env'}; missing=required-set(names); assert not missing, f'Missing {missing}'; assert '.env.example' not in names, 'Found .env.example in ZIP'; print('ZIP_OK files=', names)"
+python -c "import zipfile; z=zipfile.ZipFile('$zipName'); names=[i.filename for i in z.infolist()]; required={'DaleVision Edge Agent.exe','01 - Iniciar Agent.bat','02 - Teste rápido (run once).bat','03 - Diagnóstico (gerar ZIP).bat','04 - Instalar como Serviço (Admin).ps1','README.txt','.env'}; missing=required-set(names); assert not missing, f'Missing {missing}'; assert '.env.example' not in names, 'Found .env.example in ZIP'; print('ZIP_OK files=', names)"
 
 Write-Host "OK -> $zipName (ready for GitHub Release $Version)"

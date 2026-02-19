@@ -1,11 +1,20 @@
 param(
-  [string]$InstallDir = "$PSScriptRoot\\..\\release\\win",
+  [string]$InstallDir = "",
   [string]$TaskName = "DaleVisionEdgeAgent"
 )
 
 $ErrorActionPreference = "Stop"
 
-$agentBat = Join-Path $InstallDir "Start_DaleVision_Agent.bat"
+if ([string]::IsNullOrWhiteSpace($InstallDir)) {
+  $InstallDir = $PSScriptRoot
+  $fallback = Join-Path $PSScriptRoot "..\\release\\win"
+  $agentBat = Join-Path $InstallDir "01 - Iniciar Agent.bat"
+  if (-not (Test-Path $agentBat) -and (Test-Path $fallback)) {
+    $InstallDir = $fallback
+  }
+}
+
+$agentBat = Join-Path $InstallDir "01 - Iniciar Agent.bat"
 if (-not (Test-Path $agentBat)) {
   throw "Arquivo nao encontrado: $agentBat"
 }
