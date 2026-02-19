@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ==========================================
-echo 2) Iniciar monitoramento (rodar sempre)
+echo DALE Vision Edge Agent - Iniciar
 echo ==========================================
 echo.
 
@@ -14,20 +14,26 @@ if not exist ".env" (
   exit /b 2
 )
 
-set "DALE_LOG_DIR=%CD%\logs"
-if not "%PROGRAMDATA%"=="" (
-  set "DALE_LOG_DIR=%PROGRAMDATA%\DaleVision\logs"
-)
 set "DASH_URL=https://app.dalevision.com/app/cameras?onboarding=true"
 for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
   if /I "%%A"=="DASHBOARD_URL" set "DASH_URL=%%B"
 )
 
-echo Agente rodando. Pode minimizar. Nao feche esta janela.
+echo Agente iniciando.
+echo Deixe esta janela aberta.
 echo.
-dalevision-edge-agent.exe
+
 start "" "%DASH_URL%"
+dalevision-edge-agent.exe
+set "exit_code=%errorlevel%"
 
 echo.
-echo O agente foi encerrado. Se isso foi um erro, execute novamente.
+if not "%exit_code%"=="0" (
+  echo O agente foi encerrado com erro.
+  echo Rode Diagnose.bat e envie o ZIP para o suporte.
+) else (
+  echo O agente foi encerrado.
+)
+echo.
 pause
+exit /b %exit_code%

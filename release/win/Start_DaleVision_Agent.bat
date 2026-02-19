@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ==========================================
-echo 1) Conectar (Teste rapido)
+echo DALE Vision Edge Agent - Iniciar
 echo ==========================================
 echo.
 
@@ -14,23 +14,25 @@ if not exist ".env" (
   exit /b 2
 )
 
-set "DALE_LOG_DIR=%CD%\logs"
-if not "%PROGRAMDATA%"=="" (
-  set "DALE_LOG_DIR=%PROGRAMDATA%\DaleVision\logs"
-)
 set "DASH_URL=https://app.dalevision.com/app/cameras?onboarding=true"
 for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
   if /I "%%A"=="DASHBOARD_URL" set "DASH_URL=%%B"
 )
 
-dalevision-edge-agent.exe --once
-set "exit_code=%errorlevel%"
+echo Agente iniciando.
+echo Deixe esta janela aberta.
 echo.
-if "%exit_code%"=="0" (
-  echo ✅ Conectado. Volte ao site e clique em "Adicionar camera".
-  start "" "%DASH_URL%"
+
+start "" "%DASH_URL%"
+dalevision-edge-agent.exe
+set "exit_code=%errorlevel%"
+
+echo.
+if not "%exit_code%"=="0" (
+  echo O agente foi encerrado com erro.
+  echo Rode Diagnose.bat e envie o ZIP para o suporte.
 ) else (
-  echo ❌ Falha no teste rapido. Consulte o README.txt.
+  echo O agente foi encerrado.
 )
 echo.
 pause
