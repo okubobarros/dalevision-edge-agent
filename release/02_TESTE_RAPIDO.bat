@@ -2,5 +2,5 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
-call "%~dp001_INICIAR_DALEVISION.bat"
+call "%~dp002 - Teste rápido (run once).bat"
 exit /b %errorlevel%

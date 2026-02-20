@@ -2,5 +2,5 @@
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
-call "%~dp001_INICIAR_DALEVISION.bat"
+call "%~dp003 - Diagnóstico (gerar ZIP).bat"
 exit /b %errorlevel%

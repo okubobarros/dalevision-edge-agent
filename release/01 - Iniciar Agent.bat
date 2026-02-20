@@ -11,7 +11,7 @@ echo.
 
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado.
-  echo Abra o README.txt e preencha o .env.
+  echo Abra o LEIA_ANTES.txt e preencha o .env.
   pause
   exit /b 2
 )
@@ -39,7 +39,7 @@ set "exit_code=%errorlevel%"
 echo.
 if not "%exit_code%"=="0" (
   echo O agente foi encerrado com erro.
-  echo Rode "03 - Diagnostico (gerar ZIP).bat" e envie o ZIP para o suporte.
+  echo Rode "03_DIAGNOSTICO_E_SUPORTE.bat" e envie o ZIP para o suporte.
 ) else (
   echo O agente foi encerrado.
 )

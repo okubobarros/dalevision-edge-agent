@@ -11,7 +11,7 @@ echo.
 
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado.
-  echo Abra o README.txt e preencha o .env.
+  echo Abra o LEIA_ANTES.txt e preencha o .env.
   echo.
   echo Resultado: FALHA
   echo Codigo de saida: 1
@@ -33,12 +33,12 @@ set "raw_exit=%errorlevel%"
 
 echo.
 if "%raw_exit%"=="0" (
-  echo Conexao OK. Agora rode "01 - Iniciar Agent.bat".
+  echo Conexao OK. Agora rode "01_INICIAR_DALEVISION.bat".
   echo Resultado: OK
   set "exit_code=0"
 ) else (
   echo Falha no teste de conexao.
-  echo Rode "03 - Diagnostico (gerar ZIP).bat" e envie o ZIP para o suporte.
+  echo Rode "03_DIAGNOSTICO_E_SUPORTE.bat" e envie o ZIP para o suporte.
   echo Resultado: FALHA
   set "exit_code=1"
 )

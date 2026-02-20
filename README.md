@@ -33,9 +33,10 @@ Falha de uma camera nao derruba o processo inteiro.
 
 ## Como o dono instala (passo a passo)
 1. Baixe o ZIP oficial e extraia.
-2. Clique em `Testar_Conexao.bat` (ou rode o `dalevision-edge-agent.exe` e escolha a opcao 1).
-3. Se aparecer "Conexao OK", clique em `Start_DaleVision_Agent.bat`.
-4. Se precisar de diagnostico, rode `Diagnose.bat` e envie o ZIP via WhatsApp.
+2. Edite o `.env` com os dados do suporte.
+3. Clique em `02_TESTE_RAPIDO.bat` e aguarde `status=201`.
+4. Clique em `01_INICIAR_DALEVISION.bat` e deixe rodando.
+5. Se precisar de diagnostico, rode `03_DIAGNOSTICO_E_SUPORTE.bat` e envie o ZIP via WhatsApp.
 
 ## Comandos de suporte
 Diagnostico completo:
@@ -68,7 +69,7 @@ Snapshots sao salvos em `cache/snapshots/<camera_id>/<timestamp>.jpg`.
 ## Rodar 24/7 (Windows)
 Instalar como tarefa agendada:
 ```
-powershell -ExecutionPolicy Bypass -File install-service.ps1
+powershell -ExecutionPolicy Bypass -File "04 - Instalar como Serviço (Admin).ps1"
 ```
 
 ## Auto-update (MVP)
@@ -96,3 +97,14 @@ Configurar no `.env`:
 ## Logs
 - `logs/agent.log`: logs estruturados do agente (heartbeat, sync de cameras, ROI, erros)
 - `logs/stdout.log`: stdout/stderr do processo (via `run.bat`)
+
+## Testes locais
+Unit tests (pytest):
+```
+python -m pytest -k run_once
+```
+
+Pester (install-service):
+```
+Invoke-Pester tests/pester/install-service.Tests.ps1
+```

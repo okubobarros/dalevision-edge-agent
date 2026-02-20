@@ -1,0 +1,4 @@
+CHANGELOG (resumo)
+- Nomes simplificados para o pacote (01/02/03/99 e LEIA_ANTES).
+- install-service.ps1 agora procura arquivos no mesmo diretorio e loga em ProgramData.
+- Compatibilidade mantida com nomes antigos de arquivos.

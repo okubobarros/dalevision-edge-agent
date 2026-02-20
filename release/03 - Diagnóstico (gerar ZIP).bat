@@ -12,7 +12,7 @@ echo.
 
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado.
-  echo Abra o README.txt e preencha o .env.
+  echo Abra o LEIA_ANTES.txt e preencha o .env.
   exit /b 2
 )
 
