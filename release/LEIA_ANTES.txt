@@ -1,23 +1,16 @@
-DALE Vision — Edge Agent (Windows)
-
-PASSO 1 — Editar o .env
-Substitua o arquivo .env pelo .env enviado pelo suporte.
-
-PASSO 2 — Teste rapido
-Clique em 02_TESTE_RAPIDO.bat e aguarde.
-Se aparecer "status=201", a conexao esta OK.
-
-PASSO 3 — Iniciar
-Clique em 01_INICIAR_DALEVISION.bat e deixe rodando.
-
-PASSO 4 — Se der problema
-Clique em 03_DIAGNOSTICO_E_SUPORTE.bat e envie o ZIP para o suporte.
-
-ALERTA DO WINDOWS (SmartScreen)
-Se aparecer "Windows protegeu seu PC":
-1) Clique em "Mais informacoes"
-2) Clique em "Executar assim mesmo"
-
-AVANCADO (OPCIONAL)
-99_MODO_TECNICO.bat
-04 - Instalar como Serviço (Admin).ps1
+DALE Vision — Edge Agent (Windows)
+
+4 CLIQUES
+1) Clique em 01_CONFIGURAR.bat
+2) Clique em 02_TESTE_RAPIDO.bat e aguarde status=201
+3) Clique em 03_INICIAR.bat e deixe rodando
+4) Se precisar de suporte: 04_DIAGNOSTICO.bat e envie o ZIP
+
+ALERTA DO WINDOWS (SmartScreen)
+Se aparecer "Windows protegeu seu PC":
+1) Clique em "Mais informacoes"
+2) Clique em "Executar assim mesmo"
+
+AVANCADO (OPCIONAL)
+05_INSTALAR_AUTOINICIO.ps1
+06_VERIFICAR_AUTOINICIO.ps1

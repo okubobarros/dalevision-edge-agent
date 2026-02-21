@@ -1,6 +1,6 @@
-@echo off
-setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
-
-call "%~dp003_DIAGNOSTICO_E_SUPORTE.bat"
-exit /b %errorlevel%
+@echo off
+setlocal EnableExtensions EnableDelayedExpansion
+cd /d "%~dp0"
+
+call "%~dp004_DIAGNOSTICO.bat"
+exit /b %errorlevel%

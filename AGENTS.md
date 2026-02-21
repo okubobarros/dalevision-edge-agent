@@ -27,3 +27,7 @@
 - OpenCV e opcional.
 - Se OpenCV nao existir, tenta ffmpeg no PATH.
 - Se ambos falharem, loga mensagem clara e segue sem snapshot.
+
+## Pull Requests
+- Todo PR deve citar ao menos uma spec (ex.: `SPEC-002`).
+- Se for bugfix, deve citar tambem um `BUG-*`.
