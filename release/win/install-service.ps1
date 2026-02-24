@@ -158,6 +158,7 @@ function Invoke-InstallService {
       exit 1
     }
 
+    # Usa wrapper .ps1 para rodar oculto e garantir working directory correto no boot.
     $taskCmd = Get-TaskCommand -InstallRoot $installRoot -AgentPs1Path $agentPs1
 
     Write-Log "Instalando Task Scheduler '$TaskName' em $installRoot"

@@ -27,7 +27,7 @@ UPDATE_INTERVAL_SECONDS=21600
 Remove-Item -Recurse -Force .\release\win -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path .\release\win | Out-Null
 
-# 2) copiar artefatos obrigatorios
+# 2) copiar artefatos obrigatorios (SSOT: pasta release/)
 Copy-Item .\dist\dalevision-edge-agent.exe ".\release\win\dalevision-edge-agent.exe" -Force
 # Opcional (se houver pipeline de assinatura): assinar o exe aqui antes do zip.
 Copy-Item .\release\README.txt .\release\win\README.txt -Force
@@ -37,6 +37,7 @@ Copy-Item .\release\Diagnose.bat .\release\win\Diagnose.bat -Force
 Copy-Item .\release\update.ps1 .\release\win\update.ps1 -Force
 Copy-Item .\scripts\install-service.ps1 ".\release\win\install-service.ps1" -Force
 Copy-Item .\scripts\uninstall-service.ps1 ".\release\win\uninstall-service.ps1" -Force
+Copy-Item .\scripts\verify-service.ps1 ".\release\win\verify-service.ps1" -Force
 
 # 3) criar .env placeholder (sem segredos)
 Copy-Item .\release\.env .\release\win\.env -Force
@@ -59,6 +60,7 @@ $required = @(
   "update.ps1",
   "install-service.ps1",
   "uninstall-service.ps1",
+  "verify-service.ps1",
   "README.txt",
   ".env"
 )
@@ -73,6 +75,6 @@ Remove-Item .\$zipName -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path .\release\win\* -DestinationPath .\$zipName
 
 # 7) sanity check
-python -c "import zipfile; z=zipfile.ZipFile('$zipName'); names=[i.filename for i in z.infolist()]; required={'dalevision-edge-agent.exe','Start_DaleVision_Agent.bat','Start_DaleVision_Agent.ps1','Diagnose.bat','update.ps1','install-service.ps1','uninstall-service.ps1','README.txt','.env','logs/.keep'}; missing=required-set(names); assert not missing, f'Missing {missing}'; print('ZIP_OK files=', names)"
+python -c "import zipfile; z=zipfile.ZipFile('$zipName'); names=[i.filename for i in z.infolist()]; required={'dalevision-edge-agent.exe','Start_DaleVision_Agent.bat','Start_DaleVision_Agent.ps1','Diagnose.bat','update.ps1','install-service.ps1','uninstall-service.ps1','verify-service.ps1','README.txt','.env','logs/.keep'}; missing=required-set(names); assert not missing, f'Missing {missing}'; print('ZIP_OK files=', names)"
 
 Write-Host "OK -> $zipName (ready for GitHub Release $Version)"
