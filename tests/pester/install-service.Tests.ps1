@@ -19,15 +19,15 @@ Describe "install-service Get-TaskCommand" {
     . "$PSScriptRoot/../../scripts/install-service.ps1"
   }
 
-  It "returns powershell command with hidden window" {
+  It "returns powershell command with hidden window and log redirection" {
     $root = Join-Path $TestDrive "root"
     New-Item -ItemType Directory -Path $root | Out-Null
-    $entry = Join-Path $root "Start_DaleVision_Agent.ps1"
+    $entry = Join-Path $root "dalevision-edge-agent.exe"
     New-Item -ItemType File -Path $entry | Out-Null
 
-    $command = Get-TaskCommand -InstallRoot $root -AgentPs1Path $entry
+    $command = Get-TaskCommand -InstallRoot $root -AgentExePath $entry
 
-    $expected = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -WorkingDirectory `"$root`" -Command `"& `"$entry`"`""
+    $expected = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"Set-Location -Path `"$root`"; `"$entry`" *>> `"$root\logs\agent.log`"`""
     $command | Should Be $expected
   }
 }

@@ -31,32 +31,6 @@ function Resolve-InstallRoot {
   return $InstallDir
 }
 
-function Resolve-AgentBatPath {
-  param(
-    [string]$InstallDir,
-    [string]$ScriptRoot
-  )
-
-  if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-    $InstallDir = $ScriptRoot
-  }
-
-  return (Join-Path $InstallDir "Start_DaleVision_Agent.bat")
-}
-
-function Resolve-AgentPs1Path {
-  param(
-    [string]$InstallDir,
-    [string]$ScriptRoot
-  )
-
-  if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-    $InstallDir = $ScriptRoot
-  }
-
-  return (Join-Path $InstallDir "Start_DaleVision_Agent.ps1")
-}
-
 function Resolve-AgentExePath {
   param(
     [string]$InstallDir,
@@ -84,13 +58,14 @@ function Resolve-AgentExePath {
 function Get-TaskCommand {
   param(
     [string]$InstallRoot,
-    [string]$AgentPs1Path
+    [string]$AgentExePath
   )
 
   $installRootResolved = (Resolve-Path $InstallRoot).Path
-  $ps1Resolved = (Resolve-Path $AgentPs1Path).Path
-  $inner = "& `"$ps1Resolved`""
-  return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -WorkingDirectory `"$installRootResolved`" -Command `"$inner`""
+  $exeResolved = (Resolve-Path $AgentExePath).Path
+  $logPath = Join-Path $installRootResolved "logs\agent.log"
+  $inner = "Set-Location -Path `"$installRootResolved`"; `"$exeResolved`" *>> `"$logPath`""
+  return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
 }
 
 function Invoke-InstallService {
@@ -119,11 +94,9 @@ function Invoke-InstallService {
     }
 
     $agentExe = Resolve-AgentExePath -InstallDir $installRoot -ScriptRoot $PSScriptRoot
-    $agentBat = Resolve-AgentBatPath -InstallDir $installRoot -ScriptRoot $PSScriptRoot
-    $agentPs1 = Resolve-AgentPs1Path -InstallDir $installRoot -ScriptRoot $PSScriptRoot
 
-    if (-not (Test-Path $agentBat)) {
-      Write-Log "ERRO: arquivo nao encontrado: $agentBat"
+    if (-not (Test-Path $agentExe)) {
+      Write-Log "ERRO: executavel nao encontrado: $agentExe"
       if (Test-Path $installRoot) {
         $files = Get-ChildItem -Path $installRoot -File | Select-Object -ExpandProperty Name
         if ($files) {
@@ -142,24 +115,8 @@ function Invoke-InstallService {
       exit 1
     }
 
-    if (-not (Test-Path $agentPs1)) {
-      Write-Log "ERRO: arquivo nao encontrado: $agentPs1"
-      Write-Log "Verifique se o ZIP foi extraido corretamente."
-      Write-Log "Pressione Enter para sair."
-      Read-Host | Out-Null
-      exit 1
-    }
-
-    if (-not (Test-Path $agentExe)) {
-      Write-Log "ERRO: executavel nao encontrado: $agentExe"
-      Write-Log "Verifique se o ZIP foi extraido corretamente."
-      Write-Log "Pressione Enter para sair."
-      Read-Host | Out-Null
-      exit 1
-    }
-
-    # Usa wrapper .ps1 para rodar oculto e garantir working directory correto no boot.
-    $taskCmd = Get-TaskCommand -InstallRoot $installRoot -AgentPs1Path $agentPs1
+    # Executa oculto via PowerShell e grava logs em logs\agent.log.
+    $taskCmd = Get-TaskCommand -InstallRoot $installRoot -AgentExePath $agentExe
 
     Write-Log "Instalando Task Scheduler '$TaskName' em $installRoot"
     Write-Log "Comando: $taskCmd"

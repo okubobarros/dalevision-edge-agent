@@ -3,30 +3,22 @@ DALE Vision — Edge Agent (Windows)
 OBJETIVO
 Manter a loja online no cloud e monitorar health das cameras.
 
-TESTE RAPIDO (MANUAL)
-1) Edite o arquivo .env e preencha os dados da loja.
-2) Execute Start_DaleVision_Agent.bat.
+FASE 1: TESTE (MANUAL)
+1) Edite o arquivo .env e preencha STORE_ID e EDGE_TOKEN.
+2) Execute 02_TESTE_RAPIDO.bat.
 3) Verifique logs em logs\agent.log.
 4) No app, confirme "Edge Online".
 
-PRODUCAO (AUTO START NO BOOT)
-1) Clique com o botao direito em install-service.ps1 > Executar como administrador.
+FASE 2: SERVICO (AUTO START NO BOOT)
+1) Execute 03_INSTALAR_AUTOSTART.bat.
 2) Reinicie o PC.
-3) Verifique status da task:
-   .\verify-service.ps1
-   ou
-   schtasks /Query /TN DaleVisionEdgeAgent /V /FO LIST
+3) Verifique status:
+   04_VERIFICAR_STATUS.bat
 4) Verifique logs:
    Get-Content .\logs\agent.log -Tail 80
 
-ARQUIVOS
-- Start_DaleVision_Agent.bat: inicia o agente e grava logs em logs\agent.log.
-- Start_DaleVision_Agent.ps1: wrapper oculto para uso em servico (Task Scheduler).
-- Diagnose.bat: gera ZIP de diagnostico para suporte.
-- install-service.ps1: instala o auto start no boot (Task Scheduler).
-- verify-service.ps1: confirma se a task existe e ultima execucao.
-- uninstall-service.ps1: remove o auto start.
-- update.ps1: checagem de update (MVP, seguro).
+DIAGNOSTICO
+- Execute Diagnose.bat e envie o ZIP para o suporte.
 
 UPDATE (MVP)
 1) Preencha UPDATE_GITHUB_REPO no .env (ex: org/repo).
