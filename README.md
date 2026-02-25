@@ -38,7 +38,7 @@ Variaveis obrigatorias:
 
 ## Fluxo do agente
 
-Em modo normal (`run.bat`), o agente executa continuamente:
+Em modo normal (executando `dalevision-edge-agent.exe` ou `Start_DaleVision_Agent.bat`), o agente executa continuamente:
 
 1. envia `edge_heartbeat` para `/api/edge/events/`
 
@@ -84,15 +84,17 @@ Falha de uma camera nao derruba o processo inteiro.
 
 ## Como o dono instala (passo a passo)
 
-1. Baixe o ZIP oficial e extraia.
-
-2. Clique em `01_CONFIGURAR.bat` e preencha o `.env`.
-
-3. Clique em `02_TESTE_RAPIDO.bat` e aguarde `status=201`.
-
-4. Clique em `03_INICIAR.bat` e deixe rodando.
-
-5. Se precisar de diagnostico, rode `04_DIAGNOSTICO.bat` e envie o ZIP via WhatsApp.
+1. Baixe o ZIP oficial e extraia.
+
+2. Edite o arquivo `.env` e preencha `CLOUD_BASE_URL`, `STORE_ID` e `EDGE_TOKEN`.
+
+3. Clique em `02_TESTE_RAPIDO.bat` e aguarde `status=201`.
+
+4. Clique em `03_INSTALAR_AUTOSTART.bat` (admin) e reinicie o PC.
+
+5. Verifique `04_VERIFICAR_STATUS.bat` e confira logs em `logs\agent.log`.
+
+6. Se precisar de diagnostico, rode `Diagnose.bat` e envie o ZIP via WhatsApp.
 
 
 
@@ -154,11 +156,11 @@ Snapshots sao salvos em `cache/snapshots/<camera_id>/<timestamp>.jpg`.
 
 ## Rodar 24/7 (Windows)
 
-Instalar como tarefa agendada:
+Instalar como tarefa agendada (bundle Windows):
 
 ```
 
-powershell -ExecutionPolicy Bypass -File "05_INSTALAR_AUTOINICIO.ps1"
+powershell -ExecutionPolicy Bypass -File "install-service.ps1"
 
 ```
 
@@ -166,13 +168,13 @@ powershell -ExecutionPolicy Bypass -File "05_INSTALAR_AUTOINICIO.ps1"
 
 ## Auto-update (MVP)
 
-Configurar no `.env`:
-
-- `UPDATE_CHECK_URL`
-
-- `ENABLE_AUTO_UPDATE=1`
-
-- `UPDATE_INTERVAL_SECONDS=21600`
+Configurar no `.env`:
+
+- `AUTO_UPDATE_ENABLED=1`
+
+- `UPDATE_GITHUB_REPO=org/repo`
+
+- `UPDATE_INTERVAL_SECONDS=21600`
 
 
 
@@ -212,7 +214,7 @@ Configurar no `.env`:
 
 - `logs/agent.log`: logs estruturados do agente (heartbeat, sync de cameras, ROI, erros)
 
-- `logs/stdout.log`: stdout/stderr do processo (via `run.bat`)
+- `logs/update.log`: logs do auto-update (quando habilitado)
 
 
 

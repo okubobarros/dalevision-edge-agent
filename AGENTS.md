@@ -18,10 +18,13 @@
 2. Rode o script:
    - `.\scripts\release_windows.ps1 -Version vX.Y.Z`
 3. O ZIP final fica em `dalevision-edge-agent-windows.zip`.
+4. O bundle inclui `Start_DaleVision_Agent.bat/.ps1` e tasks de autostart/update
+   geradas via `install-service.ps1`.
 
 ## Logs e diagnostico
 - `logs/agent.log` para logs do agente.
 - `logs/diagnostics.json` e `logs/diagnostics.txt` para envio via WhatsApp.
+- `logs/update.log` para auto-update (quando habilitado).
 
 ## Snapshot
 - OpenCV e opcional.
