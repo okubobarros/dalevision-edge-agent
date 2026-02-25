@@ -1,28 +1,54 @@
 param(
-  [string]$TaskName = "DaleVisionEdgeAgent"
+  [string]$TaskName = "DaleVisionEdgeAgent",
+  [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate"
 )
 
 $ErrorActionPreference = "Stop"
 
-try {
-  $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
-  $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+function Show-TaskInfo {
+  param(
+    [string]$Name
+  )
 
-  Write-Host "Service installed OK"
-  if ($info) {
-    Write-Host "State: $($info.State)"
-    if ($info.LastRunTime) {
-      Write-Host "LastRun: $($info.LastRunTime)"
+  try {
+    $task = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
+    $info = Get-ScheduledTaskInfo -TaskName $Name -ErrorAction SilentlyContinue
+    Write-Host "OK: $Name"
+    if ($info) {
+      Write-Host "  State: $($info.State)"
+      if ($info.LastRunTime) {
+        Write-Host "  LastRun: $($info.LastRunTime)"
+      }
+      if ($info.LastTaskResult -ne $null) {
+        Write-Host "  LastResult: $($info.LastTaskResult)"
+      }
+      if ($info.NextRunTime) {
+        Write-Host "  NextRun: $($info.NextRunTime)"
+      }
     }
-    if ($info.LastTaskResult -ne $null) {
-      Write-Host "LastResult: $($info.LastTaskResult)"
-    }
+    return $true
+  } catch {
+    Write-Host "NOT installed: $Name"
+    return $false
   }
-  Write-Host "To remove: schtasks /Delete /TN `"$TaskName`" /F"
-  exit 0
-} catch {
-  Write-Host "Service NOT installed."
-  Write-Host "To install: install-service.ps1"
-  Write-Host "To remove (if exists): schtasks /Delete /TN `"$TaskName`" /F"
-  exit 1
 }
+
+$installRoot = $PSScriptRoot
+$agentLog = Join-Path $installRoot "logs\agent.log"
+$updateLog = Join-Path $installRoot "logs\update.log"
+
+Write-Host "=== Agent task ==="
+$agentOk = Show-TaskInfo -Name $TaskName
+Write-Host ""
+Write-Host "=== Update task ==="
+$updateOk = Show-TaskInfo -Name $UpdateTaskName
+Write-Host ""
+Write-Host "Logs:"
+Write-Host "  Agent:  $agentLog"
+Write-Host "  Update: $updateLog"
+Write-Host "Dica: Get-Content .\\logs\\agent.log -Tail 80"
+
+if ($agentOk) {
+  exit 0
+}
+exit 1

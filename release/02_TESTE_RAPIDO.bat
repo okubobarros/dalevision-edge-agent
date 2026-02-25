@@ -54,10 +54,10 @@ if not exist "%EXE_NAME%" (
 
 echo Logs: %LOG_FILE%
 echo.
-echo Iniciando agente (janela aberta). Pressione CTRL+C para parar.
+echo Iniciando teste rapido (uma vez).
 echo.
 
-"%EXE_NAME%" >> "%LOG_FILE%" 2>&1
+"%EXE_NAME%" --once
 set "exit_code=%errorlevel%"
 
 echo.
@@ -67,6 +67,8 @@ if not "%exit_code%"=="0" (
 ) else (
   echo O agente foi encerrado.
 )
+echo.
+echo Procure por "status=201" em %LOG_FILE%.
 echo.
 pause
 exit /b %exit_code%

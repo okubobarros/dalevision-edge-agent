@@ -1,5 +1,6 @@
 param(
-  [string]$TaskName = "DaleVisionEdgeAgent"
+  [string]$TaskName = "DaleVisionEdgeAgent",
+  [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate"
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,6 +10,21 @@ function Write-Log {
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   $line = "$timestamp $Message"
   Write-Host $line
+}
+
+function Remove-TaskIfExists {
+  param([string]$Name)
+  $queryOutput = cmd.exe /c "schtasks /Query /TN `"$Name`"" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Write-Log "Tarefa '$Name' nao encontrada."
+    return
+  }
+  Write-Log "Removendo tarefa '$Name'..."
+  $deleteOutput = cmd.exe /c "schtasks /Delete /TN `"$Name`" /F" 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    throw "Falha ao remover '$Name'. Detalhes: $deleteOutput"
+  }
+  Write-Log "Tarefa '$Name' removida."
 }
 
 try {
@@ -21,19 +37,8 @@ try {
     exit 1
   }
 
-  $queryOutput = cmd.exe /c "schtasks /Query /TN `"$TaskName`"" 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    Write-Log "Tarefa '$TaskName' nao encontrada. Nada a remover."
-    exit 0
-  }
-
-  Write-Log "Removendo tarefa '$TaskName'..."
-  $deleteOutput = cmd.exe /c "schtasks /Delete /TN `"$TaskName`" /F" 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    throw "Falha ao remover a tarefa. Detalhes: $deleteOutput"
-  }
-
-  Write-Log "Tarefa removida com sucesso."
+  Remove-TaskIfExists -Name $TaskName
+  Remove-TaskIfExists -Name $UpdateTaskName
 } catch {
   Write-Log "ERRO: $($_.Exception.Message)"
   Write-Log "Pressione Enter para sair."
