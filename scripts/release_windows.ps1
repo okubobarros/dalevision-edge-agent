@@ -23,7 +23,21 @@ function Assert-FileExists {
   }
 }
 
-# 0) validar fontes obrigatorias
+# 0) garantir .env (CI pode nao ter)
+if (-not (Test-Path $envFile)) {
+  if (Test-Path $envTemplatePath) {
+    Copy-Item $envTemplatePath $envFile -Force
+  } else {
+    @(
+      "CLOUD_BASE_URL=",
+      "STORE_ID=",
+      "EDGE_TOKEN=",
+      "AGENT_ID="
+    ) | Set-Content -Path $envFile
+  }
+}
+
+# 1) validar fontes obrigatorias
 $requiredSources = @(
   @{ Path = $distExe; Label = "dalevision-edge-agent.exe (dist)" },
   @{ Path = (Join-Path $releaseRoot "README.txt"); Label = "README.txt" },
@@ -38,23 +52,19 @@ $requiredSources = @(
   @{ Path = (Join-Path $repoRoot "scripts\verify-service.ps1"); Label = "verify-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\update.ps1"); Label = "update.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1"); Label = "internal/Start_DaleVision_Agent.ps1" },
-  @{ Path = (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat"); Label = "internal/Start_DaleVision_Agent.bat" },
-  @{ Path = $envFile; Label = ".env" }
+  @{ Path = (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat"); Label = "internal/Start_DaleVision_Agent.bat" }
 )
 
 foreach ($item in $requiredSources) {
   Assert-FileExists -Path $item.Path -Label $item.Label
 }
-if (Test-Path $envTemplatePath) {
-  throw "Unexpected .env.template in release. Use .env only."
-}
 
-# 1) limpar release/win
+# 2) limpar release/win
 Remove-Item -Recurse -Force $releaseWin -ErrorAction SilentlyContinue
 Remove-Item -Force (Join-Path $repoRoot "dalevision-edge-agent-windows.zip") -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path $releaseWin | Out-Null
 
-# 2) copiar artefatos obrigatorios (SSOT: pasta release/)
+# 3) copiar artefatos obrigatorios (SSOT: pasta release/)
 Copy-Item $distExe (Join-Path $releaseWin "dalevision-edge-agent.exe") -Force
 Copy-Item (Join-Path $releaseRoot "README.txt") (Join-Path $releaseWin "README.txt") -Force
 Copy-Item (Join-Path $releaseRoot "01_TESTE_RAPIDO.bat") (Join-Path $releaseWin "01_TESTE_RAPIDO.bat") -Force
@@ -75,13 +85,13 @@ Copy-Item (Join-Path $repoRoot "scripts\update.ps1") (Join-Path $scriptsDir "upd
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1") (Join-Path $internalDir "Start_DaleVision_Agent.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat") (Join-Path $internalDir "Start_DaleVision_Agent.bat") -Force
 
-# 3) logs/.keep
+# 4) logs/.keep
 $logDir = Join-Path $releaseWin "logs"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 New-Item -ItemType File -Path (Join-Path $logDir "agent.log") -Force | Out-Null
 New-Item -ItemType File -Path (Join-Path $logDir "update.log") -Force | Out-Null
 
-# 3.1) BUILD_INFO.txt
+# 4.1) BUILD_INFO.txt
 $buildTimestamp = Get-Date -Format o
 $gitCommit = ""
 try {
@@ -106,7 +116,7 @@ $buildInfo = @(
 )
 $buildInfo | Set-Content -Path $buildInfoPath
 
-# 4) validar arquivos obrigatorios
+# 5) validar arquivos obrigatorios
 $criticalPaths = @(
   (Join-Path $releaseWin "02_INSTALAR_AUTOSTART.bat"),
   (Join-Path $releaseWin "run_agent.cmd"),
@@ -148,12 +158,12 @@ if (Test-Path (Join-Path $releaseWin ".env.template")) {
   throw "Unexpected .env.template in release\win. Use .env only."
 }
 
-# 5) zipar
+# 6) zipar
 $zipName = Join-Path $repoRoot "dalevision-edge-agent-windows.zip"
 Remove-Item $zipName -Force -ErrorAction SilentlyContinue
 Compress-Archive -Path (Join-Path $releaseWin "*") -DestinationPath $zipName
 
-# 6) sanity check do ZIP
+# 7) sanity check do ZIP
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::OpenRead($zipName)
 $names = $zip.Entries | ForEach-Object { $_.FullName }
