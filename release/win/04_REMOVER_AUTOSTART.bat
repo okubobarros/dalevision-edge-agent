@@ -1,13 +1,22 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
+
+set "ROOT=%~dp0"
+if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+set "PD=C:\ProgramData\DaleVision\EdgeAgent\dalevision-edge-agent-windows"
+if exist "%PD%\scripts\uninstall-service.ps1" (
+  set "TARGET=%PD%"
+) else (
+  set "TARGET=%ROOT%"
+)
 
 echo ==========================================
 echo DALE Vision Edge Agent - Remover Autostart
 echo ==========================================
 echo.
 
-set "PS_CMD=PowerShell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0scripts\\uninstall-service.ps1\" -TaskName \"DaleVisionEdgeAgent\""
+set "PS_CMD=PowerShell -NoProfile -ExecutionPolicy Bypass -File \"%TARGET%\\scripts\\uninstall-service.ps1\" -TaskName \"DaleVisionEdgeAgent\""
 
 net session >nul 2>&1
 if %errorlevel%==0 (
@@ -26,7 +35,7 @@ if %errorlevel%==0 (
 )
 
 echo Solicitando permissao de administrador...
-PowerShell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"\"%~dp0scripts\\uninstall-service.ps1\"\" -TaskName \"\"DaleVisionEdgeAgent\"\"' -Wait -PassThru; exit $p.ExitCode"
+PowerShell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"\"%TARGET%\\scripts\\uninstall-service.ps1\"\" -TaskName \"\"DaleVisionEdgeAgent\"\"' -Wait -PassThru; exit $p.ExitCode"
 set "exit_code=%errorlevel%"
 
 echo.
