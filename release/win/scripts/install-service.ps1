@@ -253,6 +253,7 @@ function Invoke-InstallService {
 
     Write-Log "Servico instalado com sucesso."
     Write-Log "RESULT: $resultLabel"
+    Write-Log "Task: $TaskName"
     Write-Log "Para remover: execute uninstall-service.ps1 ou use: schtasks /Delete /TN `"$TaskName`" /F"
     Write-Log "Para checar status: schtasks /Query /TN `"$TaskName`" /V /FO LIST"
   } catch {

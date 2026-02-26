@@ -55,7 +55,7 @@ if not exist "%EXE_NAME%" (
 echo Logs: %LOG_FILE%
 echo.
 echo Iniciando teste rapido (foreground).
-echo Pressione Ctrl+C para parar.
+echo Feche esta janela para parar.
 echo.
 
 "%EXE_NAME%"

@@ -14,10 +14,10 @@ Describe "release bundle" {
       "AGENT_ID=edge-001",
       "HEARTBEAT_INTERVAL_SECONDS=30",
       "CAMERA_HEARTBEAT_INTERVAL_SECONDS=30",
-      "DASHBOARD_URL=https://app.dalevision.com/app/cameras?onboarding=true",
+      "DASHBOARD_URL=",
       "AUTO_UPDATE_ENABLED=0",
       "UPDATE_CHANNEL=stable",
-      "UPDATE_GITHUB_REPO=",
+      "UPDATE_GITHUB_REPO=daleship/dalevision-edge-agent",
       "UPDATE_INTERVAL_SECONDS=21600"
     )
 
@@ -44,6 +44,7 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
     Set-Content -Path (Join-Path $root "scripts/update.ps1") -Value "Write-Host 'update'"
     Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
+    Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/.env") -Value "CLOUD_BASE_URL=https://api.dalevision.com"
 
     $scriptPath = Join-Path $root "scripts/release_windows.ps1"
@@ -72,12 +73,14 @@ Describe "release bundle" {
       "Diagnose.bat",
       "README.txt",
       ".env",
-      "logs/.keep",
+      "logs/agent.log",
+      "logs/update.log",
       "scripts/install-service.ps1",
       "scripts/uninstall-service.ps1",
       "scripts/verify-service.ps1",
       "scripts/update.ps1",
-      "scripts/internal/Start_DaleVision_Agent.ps1"
+      "scripts/internal/Start_DaleVision_Agent.ps1",
+      "scripts/internal/Start_DaleVision_Agent.bat"
     )
 
     foreach ($item in $expected) {
@@ -107,6 +110,7 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
     Set-Content -Path (Join-Path $root "scripts/update.ps1") -Value "Write-Host 'update'"
     Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
+    Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.bat") -Value "@echo off"
     # Intencionalmente omitindo .env
 
     $scriptPath = Join-Path $root "scripts/release_windows.ps1"

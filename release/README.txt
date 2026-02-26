@@ -2,11 +2,13 @@ DALE Vision — Edge Agent (Windows)
 
 PASSO 1: CONFIGURAR
 1) Edite o arquivo .env.
-2) Preencha apenas STORE_ID e EDGE_TOKEN.
+2) Preencha STORE_ID, EDGE_TOKEN e DASHBOARD_URL.
 
 PASSO 2: TESTE RAPIDO
 1) Execute 01_TESTE_RAPIDO.bat (nao precisa admin).
-2) Verifique "status=201" em logs\agent.log.
+2) Verifique "Loaded env OK" e heartbeats.
+3) Verifique "status=201" em logs\agent.log.
+4) Para parar, feche a janela do teste rapido.
 
 PASSO 3: INSTALAR AUTOSTART
 1) Execute 02_INSTALAR_AUTOSTART.bat (precisa admin).

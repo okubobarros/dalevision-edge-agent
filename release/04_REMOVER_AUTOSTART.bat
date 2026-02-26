@@ -13,6 +13,13 @@ net session >nul 2>&1
 if %errorlevel%==0 (
   %PS_CMD%
   set "exit_code=%errorlevel%"
+  if "%exit_code%"=="0" (
+    echo.
+    echo Autostart removido com sucesso (DaleVisionEdgeAgent).
+  ) else (
+    echo.
+    echo ERRO: remocao falhou (codigo=%exit_code%).
+  )
   echo.
   pause
   exit /b %exit_code%
@@ -25,7 +32,12 @@ set "exit_code=%errorlevel%"
 if not "%exit_code%"=="0" (
   echo.
   echo ERRO: remocao cancelada ou falhou (codigo=%exit_code%).
+  echo.
+  pause
+  exit /b %exit_code%
 )
+echo.
+echo Autostart removido com sucesso (DaleVisionEdgeAgent).
 echo.
 pause
 exit /b %exit_code%

@@ -36,6 +36,7 @@ $requiredSources = @(
   @{ Path = (Join-Path $repoRoot "scripts\verify-service.ps1"); Label = "verify-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\update.ps1"); Label = "update.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1"); Label = "internal/Start_DaleVision_Agent.ps1" },
+  @{ Path = (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat"); Label = "internal/Start_DaleVision_Agent.bat" },
   @{ Path = $envFile; Label = ".env" }
 )
 
@@ -68,11 +69,13 @@ Copy-Item (Join-Path $repoRoot "scripts\uninstall-service.ps1") (Join-Path $scri
 Copy-Item (Join-Path $repoRoot "scripts\verify-service.ps1") (Join-Path $scriptsDir "verify-service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\update.ps1") (Join-Path $scriptsDir "update.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1") (Join-Path $internalDir "Start_DaleVision_Agent.ps1") -Force
+Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat") (Join-Path $internalDir "Start_DaleVision_Agent.bat") -Force
 
 # 3) logs/.keep
 $logDir = Join-Path $releaseWin "logs"
 New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-New-Item -ItemType File -Path (Join-Path $logDir ".keep") -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $logDir "agent.log") -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $logDir "update.log") -Force | Out-Null
 
 # 4) validar arquivos obrigatorios
 $required = @(
@@ -84,12 +87,14 @@ $required = @(
   "Diagnose.bat",
   "README.txt",
   ".env",
-  "logs/.keep",
+  "logs/agent.log",
+  "logs/update.log",
   "scripts/install-service.ps1",
   "scripts/uninstall-service.ps1",
   "scripts/verify-service.ps1",
   "scripts/update.ps1",
-  "scripts/internal/Start_DaleVision_Agent.ps1"
+  "scripts/internal/Start_DaleVision_Agent.ps1",
+  "scripts/internal/Start_DaleVision_Agent.bat"
 )
 $missing = $required | Where-Object { -not (Test-Path (Join-Path $releaseWin $_)) }
 if ($missing.Count -gt 0) {
