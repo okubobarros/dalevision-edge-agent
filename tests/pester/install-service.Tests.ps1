@@ -39,6 +39,7 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "release/03_VERIFICAR_STATUS.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/run_agent.cmd") -Value "@echo off"
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
@@ -71,6 +72,8 @@ Describe "release bundle" {
       "03_VERIFICAR_STATUS.bat",
       "04_REMOVER_AUTOSTART.bat",
       "Diagnose.bat",
+      "run_agent.cmd",
+      "BUILD_INFO.txt",
       "README.txt",
       ".env",
       "logs/agent.log",
@@ -105,6 +108,7 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "release/03_VERIFICAR_STATUS.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/run_agent.cmd") -Value "@echo off"
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"

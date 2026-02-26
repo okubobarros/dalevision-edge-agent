@@ -4,10 +4,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$installRoot = (Resolve-Path $InstallDir).Path
+$installDirSafe = $InstallDir
+if ($null -eq $installDirSafe) { $installDirSafe = "" }
+$installDirSafe = $installDirSafe.Trim().Trim('"').TrimEnd("\", "/").Trim()
+$installRoot = (Resolve-Path $installDirSafe).Path
 $exePath = Join-Path $installRoot "dalevision-edge-agent.exe"
 $logDir = Join-Path $installRoot "logs"
-$logPath = Join-Path $logDir "agent.log"
 
 if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -20,5 +22,12 @@ if (-not (Test-Path $exePath)) {
 
 $env:DALE_RUN_MODE = "service"
 Set-Location -Path $installRoot
-& $exePath *>> $logPath
-exit $LASTEXITCODE
+
+$oldEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+& $exePath
+$exitCode = $LASTEXITCODE
+$ErrorActionPreference = $oldEap
+
+Write-Host ("EXIT_CODE=" + $exitCode)
+exit $exitCode

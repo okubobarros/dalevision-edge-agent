@@ -29,6 +29,11 @@ echo Solicitando permissao de administrador...
 PowerShell -NoProfile -ExecutionPolicy Bypass -Command "$p = Start-Process PowerShell -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"\"%~dp0scripts\\uninstall-service.ps1\"\" -TaskName \"\"DaleVisionEdgeAgent\"\"' -Wait -PassThru; exit $p.ExitCode"
 set "exit_code=%errorlevel%"
 
+echo.
+echo Se a janela de administrador abriu, aguarde ela finalizar.
+echo.
+pause
+
 if not "%exit_code%"=="0" (
   echo.
   echo ERRO: remocao cancelada ou falhou (codigo=%exit_code%).

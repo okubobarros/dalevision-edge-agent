@@ -13,6 +13,8 @@ PASSO 2: TESTE RAPIDO
 PASSO 3: INSTALAR AUTOSTART
 1) Execute 02_INSTALAR_AUTOSTART.bat (precisa admin).
 2) A tarefa roda como SYSTEM, em janela oculta.
+3) O instalador copia automaticamente para C:\ProgramData\DaleVision\EdgeAgent
+3) Se o Windows bloqueou o download, o instalador ja desbloqueia automaticamente.
 
 PASSO 4: VERIFICAR STATUS
 1) Execute 03_VERIFICAR_STATUS.bat.

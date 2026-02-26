@@ -1,17 +1,22 @@
 param(
-  [string]$InstallDir = $PSScriptRoot,
+  [string]$InstallDir = (Split-Path -Parent $PSScriptRoot),
   [string]$TaskName = "DaleVisionEdgeAgent",
   [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate",
   [switch]$WhatIf
 )
 
 $ErrorActionPreference = "Stop"
+$script:schtasksExe = $null
 
 function Write-Log {
   param([string]$Message)
   $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
   $line = "$timestamp $Message"
-  Add-Content -Path $script:LogPath -Value $line
+  try {
+    Add-Content -Path $script:LogPath -Value $line
+  } catch {
+    Write-Host "(log write failed: $($_.Exception.Message))"
+  }
   Write-Host $Message
 }
 
@@ -21,12 +26,22 @@ function Resolve-InstallRoot {
     [string]$ScriptRoot
   )
 
+  if ($null -eq $InstallDir) { $InstallDir = "" }
+  $InstallDir = $InstallDir.Trim().Trim('"')
+  $defaultRoot = Split-Path -Parent $ScriptRoot
   if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-    return (Resolve-Path $ScriptRoot).Path
+    return (Resolve-Path $defaultRoot).Path
   }
 
+  $InstallDir = $InstallDir.Trim().TrimEnd("\", "/").Trim()
   if (Test-Path $InstallDir) {
-    return (Resolve-Path $InstallDir).Path
+    $resolved = (Resolve-Path $InstallDir).Path
+    $trimmed = $resolved.TrimEnd("\", "/")
+    $leaf = Split-Path -Leaf $trimmed
+    if ($leaf -ieq "scripts") {
+      return (Resolve-Path (Split-Path -Parent $trimmed)).Path
+    }
+    return $trimmed
   }
 
   return $InstallDir
@@ -55,6 +70,38 @@ function Read-EnvFile {
   return $result
 }
 
+function Invoke-Schtasks {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$SchtasksArgs,
+    [switch]$AllowNotFound
+  )
+
+  if ($null -eq $SchtasksArgs -or $SchtasksArgs.Count -eq 0) {
+    throw "BUG: Invoke-Schtasks chamado com SchtasksArgs vazio"
+  }
+
+  Write-Log ("SCHTASKS_ARGS=" + ($SchtasksArgs -join " "))
+
+  $out = & $script:schtasksExe @SchtasksArgs 2>&1
+  $code = $LASTEXITCODE
+
+  Write-Log ("SCHTASKS_EXITCODE=" + $code)
+  Write-Log ("SCHTASKS_OUTPUT=" + (($out | Out-String).Trim()))
+
+  if ($code -ne 0) {
+    $text = ($out | Out-String)
+    $isQuery = ($SchtasksArgs.Count -ge 1 -and $SchtasksArgs[0] -ieq "/Query")
+    if ($AllowNotFound -and $isQuery) {
+      Write-Log "SCHTASKS_NOTFOUND_OK"
+      return @{ Code = $code; Output = $text; NotFound = $true }
+    }
+    throw ("SCHTASKS_FAILED ExitCode=$code Output=$text")
+  }
+
+  return @{ Code = $code; Output = ($out | Out-String); NotFound = $false }
+}
+
 function Resolve-AgentExePath {
   param(
     [string]$InstallDir,
@@ -62,12 +109,13 @@ function Resolve-AgentExePath {
   )
 
   if ([string]::IsNullOrWhiteSpace($InstallDir)) {
-    $InstallDir = $ScriptRoot
+    $InstallDir = Split-Path -Parent $ScriptRoot
   }
 
   $candidates = @(
     (Join-Path $InstallDir "dalevision-edge-agent.exe"),
-    (Join-Path $InstallDir "DaleVision Edge Agent.exe")
+    (Join-Path $InstallDir "DaleVision Edge Agent.exe"),
+    (Join-Path $InstallDir "scripts\dalevision-edge-agent.exe")
   )
 
   foreach ($candidate in $candidates) {
@@ -76,7 +124,7 @@ function Resolve-AgentExePath {
     }
   }
 
-  return $candidates[0]
+  return $candidates
 }
 
 function Get-AgentTaskCommand {
@@ -85,16 +133,13 @@ function Get-AgentTaskCommand {
     [string]$AgentExePath
   )
 
-  $startPs1 = Join-Path $InstallRoot "scripts\internal\Start_DaleVision_Agent.ps1"
-  if (Test-Path $startPs1) {
-    return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startPs1`" -InstallDir `"$InstallRoot`""
-  }
-
   $installRootResolved = (Resolve-Path $InstallRoot).Path
-  $exeResolved = (Resolve-Path $AgentExePath).Path
-  $logPath = Join-Path $installRootResolved "logs\agent.log"
-  $inner = "Set-Location -Path `"$installRootResolved`"; `"$exeResolved`" *>> `"$logPath`""
-  return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$inner`""
+  $runCmdPath = Join-Path $installRootResolved "run_agent.cmd"
+  if (-not (Test-Path $runCmdPath)) {
+    throw "run_agent.cmd nao encontrado: $runCmdPath"
+  }
+  $runCmd = (Resolve-Path $runCmdPath).Path
+  return "`"$runCmd`""
 }
 
 function Get-UpdateIntervalHours {
@@ -137,7 +182,24 @@ function Invoke-InstallService {
   if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
   }
-  $script:LogPath = Join-Path $logDir "service_install.log"
+  try {
+    & icacls $installRoot /grant "SYSTEM:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T | Out-Null
+    & icacls $logDir /grant "SYSTEM:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T | Out-Null
+  } catch {
+    Write-Log "WARN: falha ao ajustar permissao do logs: $($_.Exception.Message)"
+  }
+  $script:LogPath = Join-Path $logDir "service_install.ps1.log"
+  $installLog = $script:LogPath
+  $self = $MyInvocation.MyCommand.Path
+  if (-not [string]::IsNullOrWhiteSpace($self)) {
+    Write-Log "SELF_PATH=$self"
+    try {
+      $selfHash = (Get-FileHash -Algorithm SHA256 -Path $self).Hash
+      Write-Log "SELF_SHA256=$selfHash"
+    } catch {
+      Write-Log "SELF_SHA256=ERROR $($_.Exception.Message)"
+    }
+  }
 
   try {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -149,10 +211,12 @@ function Invoke-InstallService {
       exit 1
     }
 
-    $agentExe = Resolve-AgentExePath -InstallDir $installRoot -ScriptRoot $PSScriptRoot
+    $agentExeCandidates = Resolve-AgentExePath -InstallDir $installRoot -ScriptRoot $PSScriptRoot
+    $agentExe = $agentExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 
-    if (-not (Test-Path $agentExe)) {
-      Write-Log "ERRO: executavel nao encontrado: $agentExe"
+    if (-not $agentExe) {
+      $list = $agentExeCandidates -join "; "
+      Write-Log "ERRO: executavel nao encontrado. Procurado em: $list"
       if (Test-Path $installRoot) {
         $files = Get-ChildItem -Path $installRoot -File | Select-Object -ExpandProperty Name
         if ($files) {
@@ -174,6 +238,26 @@ function Invoke-InstallService {
     # Executa oculto via PowerShell e grava logs em logs\agent.log.
     $taskCmd = Get-AgentTaskCommand -InstallRoot $installRoot -AgentExePath $agentExe
 
+    $psExePath = Join-Path $env:WINDIR "System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+    Write-Log "EXISTS_psExe=$(Test-Path $psExePath)"
+    $startPs1Check = Join-Path $installRoot "scripts\\internal\\Start_DaleVision_Agent.ps1"
+    Write-Log "EXISTS_startPs1=$(Test-Path $startPs1Check)"
+
+    $script:schtasksExe = (Resolve-Path (Join-Path $env:WINDIR "System32\\schtasks.exe")).Path
+    Write-Log "SCHTASKS_PATH=$script:schtasksExe"
+    Write-Log "EXISTS_schtasks=$(Test-Path $script:schtasksExe)"
+
+    $installInfo = @(
+      "installRoot=$installRoot",
+      "exeResolved=$agentExe",
+      "taskName=$TaskName",
+      "command=$taskCmd"
+    )
+    foreach ($line in $installInfo) {
+      Write-Host $line
+      Add-Content -Path $installLog -Value $line
+    }
+
     Write-Log "Instalando Task Scheduler '$TaskName' em $installRoot"
     Write-Log "Comando: $taskCmd"
 
@@ -183,10 +267,31 @@ function Invoke-InstallService {
     }
 
     $resultLabel = "INSTALLED"
-    $existingOutput = & schtasks /Query /TN $TaskName 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    Write-Log "TASK_EXISTS_CHECK: querying..."
+    $taskExists = $false
+
+    $tn = $TaskName.Replace('"', '')
+    $cmd = $env:ComSpec
+    if ([string]::IsNullOrWhiteSpace($cmd)) {
+      $cmd = "$env:WINDIR\\System32\\cmd.exe"
+    }
+
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $queryOut = & $cmd /c "`"$script:schtasksExe`" /Query /TN `"$tn`"" 2>&1
+    $queryCode = $LASTEXITCODE
+    $ErrorActionPreference = $oldEap
+
+    Write-Log "TASK_EXISTS_QUERY_EXITCODE=$queryCode"
+    Write-Log ("TASK_EXISTS_QUERY_OUTPUT=" + (($queryOut | Out-String).Trim()))
+
+    if ($queryCode -eq 0) {
+      $taskExists = $true
+      Write-Log "TASK_EXISTS=true"
       Write-Log "Tarefa existente encontrada. Sera atualizada."
       $resultLabel = "UPDATED"
+    } else {
+      Write-Log "TASK_EXISTS=false (expected on first install). Continuing to /Create."
     }
 
     $taskArgs = @(
@@ -195,22 +300,53 @@ function Invoke-InstallService {
       "/SC", "ONSTART",
       "/RU", "SYSTEM",
       "/RL", "HIGHEST",
-      "/DELAY", "0000:30",
       "/TN", $TaskName,
       "/TR", $taskCmd
     )
 
-    Write-Log "Criando tarefa..."
-    Write-Log ("schtasks " + ($taskArgs -join " "))
-
-    $createOutput = & schtasks @taskArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      throw "Falha ao criar a tarefa agendada. Detalhes: $createOutput"
+    Write-Log "ABOUT_TO_CREATE_TASK"
+    $createCode = 0
+    $createOutput = ""
+    $usedScheduledTasks = $false
+    try {
+      if (Get-Module -ListAvailable -Name ScheduledTasks) {
+        $usedScheduledTasks = $true
+        $runCmd = Join-Path $installRoot "run_agent.cmd"
+        if (-not (Test-Path $runCmd)) {
+          throw "run_agent.cmd nao encontrado: $runCmd"
+        }
+        $action = New-ScheduledTaskAction -Execute $runCmd
+        $trigger = New-ScheduledTaskTrigger -AtStartup
+        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+        $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
+        $createOutput = (Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-String)
+      } else {
+        $createOutput = "ScheduledTasks module not available. Falling back to schtasks."
+        $createResult = Invoke-Schtasks -SchtasksArgs $taskArgs
+        $createCode = $createResult.Code
+        $createOutput = ($createOutput + "`n" + ($createResult.Output | Out-String))
+      }
+    } catch {
+      $createCode = 1
+      $createOutput = $_.Exception.ToString()
     }
 
-    $queryOutput = & schtasks /Query /TN $TaskName 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      throw "Tarefa nao encontrada apos criacao. Detalhes: $queryOutput"
+    Write-Log ("CREATE_EXITCODE=" + $createCode)
+    Write-Log ("CREATE_OUTPUT=" + (($createOutput | Out-String).Trim()))
+    if ($createCode -ne 0) {
+      throw "Falha ao criar a tarefa agendada. ExitCode=$createCode Detalhes: $createOutput"
+    }
+
+    try {
+      $taskObj = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+      $actionObj = $taskObj.Actions | Select-Object -First 1
+      if ($actionObj) {
+        Write-Log ("TASK_ACTION=" + $actionObj.Execute)
+        Write-Log ("TASK_ARGUMENT=" + $actionObj.Arguments)
+      }
+    } catch {
+      throw "Tarefa nao encontrada apos criacao. Detalhes: $($_.Exception.Message)"
     }
 
     $updateScript = Join-Path $installRoot "scripts\update.ps1"
@@ -223,11 +359,7 @@ function Invoke-InstallService {
       Write-Log "UPDATE: update.ps1 nao encontrado. Pulando tarefa de update."
     } elseif (-not $autoEnabled -or [string]::IsNullOrWhiteSpace($repo)) {
       Write-Log "UPDATE: auto-update desabilitado (AUTO_UPDATE_ENABLED=1 e UPDATE_GITHUB_REPO)."
-      $updateExists = & schtasks /Query /TN $UpdateTaskName 2>$null
-      if ($LASTEXITCODE -eq 0) {
-        Write-Log "UPDATE: removendo tarefa antiga '$UpdateTaskName'."
-        & schtasks /Delete /TN $UpdateTaskName /F | Out-Null
-      }
+      # Nao consulta/remove task de update quando auto-update esta desabilitado.
     } else {
       $intervalHours = Get-UpdateIntervalHours -EnvVars $envVars
       $updateCmd = Get-UpdateTaskCommand -InstallRoot $installRoot
@@ -244,11 +376,7 @@ function Invoke-InstallService {
       )
 
       Write-Log "UPDATE: criando tarefa '$UpdateTaskName' (a cada ${intervalHours}h)"
-      Write-Log ("schtasks " + ($updateArgs -join " "))
-      $updateOutput = & schtasks @updateArgs 2>&1
-      if ($LASTEXITCODE -ne 0) {
-        throw "Falha ao criar tarefa de update. Detalhes: $updateOutput"
-      }
+      Invoke-Schtasks -SchtasksArgs $updateArgs | Out-Null
     }
 
     Write-Log "Servico instalado com sucesso."
