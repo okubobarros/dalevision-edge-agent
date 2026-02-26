@@ -26,6 +26,14 @@ function Show-TaskInfo {
         Write-Host "  NextRun: $($info.NextRunTime)"
       }
     }
+    if ($task -and $task.Actions) {
+      $action = $task.Actions | Select-Object -First 1
+      if ($action.Execute) {
+        $args = $action.Arguments
+        if ([string]::IsNullOrWhiteSpace($args)) { $args = "" }
+        Write-Host "  Action: $($action.Execute) $args"
+      }
+    }
     return $true
   } catch {
     Write-Host "NOT installed: $Name"
@@ -33,7 +41,7 @@ function Show-TaskInfo {
   }
 }
 
-$installRoot = $PSScriptRoot
+$installRoot = Split-Path -Parent $PSScriptRoot
 $agentLog = Join-Path $installRoot "logs\agent.log"
 $updateLog = Join-Path $installRoot "logs\update.log"
 
@@ -46,7 +54,14 @@ Write-Host ""
 Write-Host "Logs:"
 Write-Host "  Agent:  $agentLog"
 Write-Host "  Update: $updateLog"
-Write-Host "Dica: Get-Content .\\logs\\agent.log -Tail 80"
+if (Test-Path $agentLog) {
+  Write-Host ""
+  Write-Host "Ultimas 30 linhas do agent.log:"
+  Get-Content -Path $agentLog -Tail 30 | ForEach-Object { Write-Host "  $_" }
+} else {
+  Write-Host ""
+  Write-Host "agent.log nao encontrado."
+}
 
 if ($agentOk) {
   exit 0

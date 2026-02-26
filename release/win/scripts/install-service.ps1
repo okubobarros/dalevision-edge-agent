@@ -85,9 +85,9 @@ function Get-AgentTaskCommand {
     [string]$AgentExePath
   )
 
-  $startPs1 = Join-Path $InstallRoot "Start_DaleVision_Agent.ps1"
+  $startPs1 = Join-Path $InstallRoot "scripts\internal\Start_DaleVision_Agent.ps1"
   if (Test-Path $startPs1) {
-    return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startPs1`""
+    return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startPs1`" -InstallDir `"$InstallRoot`""
   }
 
   $installRootResolved = (Resolve-Path $InstallRoot).Path
@@ -119,7 +119,7 @@ function Get-UpdateTaskCommand {
   param(
     [string]$InstallRoot
   )
-  $updateScript = Join-Path $InstallRoot "update.ps1"
+  $updateScript = Join-Path $InstallRoot "scripts\update.ps1"
   return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$updateScript`" -InstallDir `"$InstallRoot`""
 }
 
@@ -182,9 +182,11 @@ function Invoke-InstallService {
       exit 0
     }
 
+    $resultLabel = "INSTALLED"
     $existingOutput = & schtasks /Query /TN $TaskName 2>&1
     if ($LASTEXITCODE -eq 0) {
       Write-Log "Tarefa existente encontrada. Sera atualizada."
+      $resultLabel = "UPDATED"
     }
 
     $taskArgs = @(
@@ -211,7 +213,7 @@ function Invoke-InstallService {
       throw "Tarefa nao encontrada apos criacao. Detalhes: $queryOutput"
     }
 
-    $updateScript = Join-Path $installRoot "update.ps1"
+    $updateScript = Join-Path $installRoot "scripts\update.ps1"
     $envPath = Join-Path $installRoot ".env"
     $envVars = Read-EnvFile -Path $envPath
     $autoEnabled = ($envVars["AUTO_UPDATE_ENABLED"] -eq "1")
@@ -250,6 +252,7 @@ function Invoke-InstallService {
     }
 
     Write-Log "Servico instalado com sucesso."
+    Write-Log "RESULT: $resultLabel"
     Write-Log "Para remover: execute uninstall-service.ps1 ou use: schtasks /Delete /TN `"$TaskName`" /F"
     Write-Log "Para checar status: schtasks /Query /TN `"$TaskName`" /V /FO LIST"
   } catch {

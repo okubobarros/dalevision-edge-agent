@@ -15,7 +15,7 @@ echo.
 
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado.
-  echo Copie .env.template para .env e preencha os dados da loja.
+  echo Edite o .env e preencha os dados da loja.
   echo.
   pause
   exit /b 2
@@ -54,10 +54,11 @@ if not exist "%EXE_NAME%" (
 
 echo Logs: %LOG_FILE%
 echo.
-echo Iniciando teste rapido (uma vez).
+echo Iniciando teste rapido (foreground).
+echo Pressione Ctrl+C para parar.
 echo.
 
-"%EXE_NAME%" --once
+"%EXE_NAME%"
 set "exit_code=%errorlevel%"
 
 echo.
@@ -67,8 +68,6 @@ if not "%exit_code%"=="0" (
 ) else (
   echo O agente foi encerrado.
 )
-echo.
-echo Procure por "status=201" em %LOG_FILE%.
 echo.
 pause
 exit /b %exit_code%

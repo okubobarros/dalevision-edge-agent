@@ -1,6 +1,6 @@
 Describe "release bundle" {
-  It ".env.template contains all required keys in order" {
-    $envPath = Join-Path $PSScriptRoot "../../release/.env.template"
+  It ".env contains all required keys in order" {
+    $envPath = Join-Path $PSScriptRoot "../../release/.env"
     (Test-Path $envPath) | Should Be $true
 
     $lines = Get-Content -Path $envPath |
@@ -30,21 +30,21 @@ Describe "release bundle" {
     New-Item -ItemType Directory -Path (Join-Path $root "dist") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "release") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "scripts") | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $root "scripts/internal") | Out-Null
 
     New-Item -ItemType File -Path (Join-Path $root "dist/dalevision-edge-agent.exe") | Out-Null
     Set-Content -Path (Join-Path $root "release/README.txt") -Value "README"
-    Set-Content -Path (Join-Path $root "release/02_TESTE_RAPIDO.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/03_INSTALAR_AUTOSTART.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/04_VERIFICAR_STATUS.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/05_REMOVER_SERVICO.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/Start_DaleVision_Agent.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
+    Set-Content -Path (Join-Path $root "release/01_TESTE_RAPIDO.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/02_INSTALAR_AUTOSTART.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/03_VERIFICAR_STATUS.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/update.ps1") -Value "Write-Host 'update'"
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
-    Set-Content -Path (Join-Path $root "release/.env.template") -Value "CLOUD_BASE_URL=https://api.dalevision.com"
+    Set-Content -Path (Join-Path $root "scripts/update.ps1") -Value "Write-Host 'update'"
+    Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
+    Set-Content -Path (Join-Path $root "release/.env") -Value "CLOUD_BASE_URL=https://api.dalevision.com"
 
     $scriptPath = Join-Path $root "scripts/release_windows.ps1"
     Copy-Item (Join-Path $PSScriptRoot "../../scripts/release_windows.ps1") $scriptPath -Force
@@ -65,27 +65,26 @@ Describe "release bundle" {
 
     $expected = @(
       "dalevision-edge-agent.exe",
-      "02_TESTE_RAPIDO.bat",
-      "03_INSTALAR_AUTOSTART.bat",
-      "04_VERIFICAR_STATUS.bat",
-      "05_REMOVER_SERVICO.bat",
-      "Start_DaleVision_Agent.bat",
-      "Start_DaleVision_Agent.ps1",
+      "01_TESTE_RAPIDO.bat",
+      "02_INSTALAR_AUTOSTART.bat",
+      "03_VERIFICAR_STATUS.bat",
+      "04_REMOVER_AUTOSTART.bat",
       "Diagnose.bat",
-      "update.ps1",
-      "install-service.ps1",
-      "uninstall-service.ps1",
-      "verify-service.ps1",
       "README.txt",
-      ".env.template",
-      "logs/.keep"
+      ".env",
+      "logs/.keep",
+      "scripts/install-service.ps1",
+      "scripts/uninstall-service.ps1",
+      "scripts/verify-service.ps1",
+      "scripts/update.ps1",
+      "scripts/internal/Start_DaleVision_Agent.ps1"
     )
 
     foreach ($item in $expected) {
       ($names -contains $item) | Should Be $true
     }
 
-    ($names -contains ".env") | Should Be $false
+    ($names -contains ".env.template") | Should Be $false
   }
 
   It "release_windows.ps1 fails when required file is missing" {
@@ -94,21 +93,21 @@ Describe "release bundle" {
     New-Item -ItemType Directory -Path (Join-Path $root "dist") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "release") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "scripts") | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $root "scripts/internal") | Out-Null
 
     New-Item -ItemType File -Path (Join-Path $root "dist/dalevision-edge-agent.exe") | Out-Null
     Set-Content -Path (Join-Path $root "release/README.txt") -Value "README"
-    Set-Content -Path (Join-Path $root "release/02_TESTE_RAPIDO.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/03_INSTALAR_AUTOSTART.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/04_VERIFICAR_STATUS.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/05_REMOVER_SERVICO.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/Start_DaleVision_Agent.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
+    Set-Content -Path (Join-Path $root "release/01_TESTE_RAPIDO.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/02_INSTALAR_AUTOSTART.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/03_VERIFICAR_STATUS.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
-    Set-Content -Path (Join-Path $root "release/update.ps1") -Value "Write-Host 'update'"
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
-    # Intencionalmente omitindo .env.template
+    Set-Content -Path (Join-Path $root "scripts/update.ps1") -Value "Write-Host 'update'"
+    Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
+    # Intencionalmente omitindo .env
 
     $scriptPath = Join-Path $root "scripts/release_windows.ps1"
     Copy-Item (Join-Path $PSScriptRoot "../../scripts/release_windows.ps1") $scriptPath -Force

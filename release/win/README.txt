@@ -1,46 +1,39 @@
 DALE Vision — Edge Agent (Windows)
 
-FASE A: CONFIGURAR
-1) Edite o arquivo .env.template.
+PASSO 1: CONFIGURAR
+1) Edite o arquivo .env.
 2) Preencha apenas STORE_ID e EDGE_TOKEN.
-3) Salve como .env (copie/renomeie o arquivo).
 
-FASE B: TESTE RAPIDO (UMA VEZ)
-1) Execute 02_TESTE_RAPIDO.bat.
+PASSO 2: TESTE RAPIDO
+1) Execute 01_TESTE_RAPIDO.bat (nao precisa admin).
 2) Verifique "status=201" em logs\agent.log.
 
-FASE C: INSTALAR AUTOSTART
-1) Execute 03_INSTALAR_AUTOSTART.bat (precisa admin).
+PASSO 3: INSTALAR AUTOSTART
+1) Execute 02_INSTALAR_AUTOSTART.bat (precisa admin).
 2) A tarefa roda como SYSTEM, em janela oculta.
 
-FASE D: VERIFICAR STATUS
-1) Execute 04_VERIFICAR_STATUS.bat.
-2) Veja a tarefa instalada + ultima execucao.
-3) Logs: logs\agent.log.
+PASSO 4: VERIFICAR STATUS
+1) Execute 03_VERIFICAR_STATUS.bat.
+2) Veja o status da tarefa e as ultimas linhas do log.
 
-FASE E: REMOVER SERVICO
-1) Execute 05_REMOVER_SERVICO.bat.
+PASSO 5: REMOVER AUTOSTART
+1) Execute 04_REMOVER_AUTOSTART.bat (precisa admin).
 
 IMPORTANTE
-- Start_DaleVision_Agent.bat/.ps1 NAO sao para clicar manualmente.
-  Eles sao usados pela tarefa agendada.
+- Nao clique em arquivos .ps1 dentro de scripts\.
 - Auto-update vem desativado por padrao (AUTO_UPDATE_ENABLED=0).
 
 ARQUIVOS NO ZIP
 - dalevision-edge-agent.exe
-- .env.template
-- 02_TESTE_RAPIDO.bat
-- 03_INSTALAR_AUTOSTART.bat
-- 04_VERIFICAR_STATUS.bat
-- 05_REMOVER_SERVICO.bat
-- Start_DaleVision_Agent.bat
-- Start_DaleVision_Agent.ps1
-- install-service.ps1
-- uninstall-service.ps1
-- verify-service.ps1
-- update.ps1
+- .env
+- 01_TESTE_RAPIDO.bat
+- 02_INSTALAR_AUTOSTART.bat
+- 03_VERIFICAR_STATUS.bat
+- 04_REMOVER_AUTOSTART.bat
 - Diagnose.bat
+- README.txt
 - logs\
+- scripts\
 
 UPDATE (MVP)
 1) Configure no .env:
@@ -56,7 +49,6 @@ DIAGNOSTICO
 - Para checar a tarefa, use o Task Scheduler ou:
   schtasks /Query /TN DaleVisionEdgeAgent /V /FO LIST
 
-ALERTA DO WINDOWS (SmartScreen)
-Se aparecer "Windows protegeu seu PC":
-1) Clique em "Mais informacoes"
-2) Clique em "Executar assim mesmo"
+SE O WINDOWS BLOQUEAR O ARQUIVO (DOWNLOAD)
+1) Clique com o botao direito no .zip ou .exe
+2) Propriedades > Desbloquear > Aplicar
