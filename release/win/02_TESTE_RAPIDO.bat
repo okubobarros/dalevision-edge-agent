@@ -15,7 +15,7 @@ echo.
 
 if not exist ".env" (
   echo ERRO: arquivo .env nao encontrado.
-  echo Edite o .env e preencha os dados da loja.
+  echo Copie .env.template para .env e preencha os dados da loja.
   echo.
   pause
   exit /b 2
