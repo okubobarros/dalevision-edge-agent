@@ -25,7 +25,7 @@ Set-Location -Path $installRoot
 
 $oldEap = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-& $exePath
+& $exePath run
 $exitCode = $LASTEXITCODE
 $ErrorActionPreference = $oldEap
 

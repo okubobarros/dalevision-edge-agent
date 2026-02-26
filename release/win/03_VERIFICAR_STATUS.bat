@@ -1,6 +1,15 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-cd /d "%~dp0"
+
+set "ROOT=%~dp0"
+if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+set "PD=C:\ProgramData\DaleVision\EdgeAgent\dalevision-edge-agent-windows"
+if exist "%PD%\scripts\verify-service.ps1" (
+  set "TARGET=%PD%"
+) else (
+  set "TARGET=%ROOT%"
+)
 
 echo ==========================================
 echo DALE Vision Edge Agent - Verificar Status
@@ -16,7 +25,8 @@ if %errorlevel% neq 0 (
   exit /b
 )
 
-PowerShell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\\verify-service.ps1"
+cd /d "%TARGET%"
+PowerShell -NoProfile -ExecutionPolicy Bypass -File "%TARGET%\\scripts\\verify-service.ps1"
 echo.
 pause
 exit /b %errorlevel%

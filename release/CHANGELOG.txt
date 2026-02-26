@@ -3,3 +3,4 @@ CHANGELOG (resumo)
 - install-service.ps1 agora procura arquivos no mesmo diretorio e loga em ProgramData.
 - Compatibilidade mantida com nomes antigos de arquivos.
 - Build release: release_windows.ps1 agora cria .env automaticamente no CI quando ausente.
+- 03_VERIFICAR_STATUS.bat agora aponta para logs em ProgramData quando instalacao existir.
