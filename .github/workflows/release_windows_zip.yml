@@ -26,9 +26,22 @@ jobs:
           python -m pip install .
           python -m pip install pyinstaller
 
+      - name: Sanity check spec
+        shell: pwsh
+        run: |
+          Write-Host "PWD:" (Get-Location)
+          Write-Host "Repo root contents:"
+          Get-ChildItem -Force
+          Write-Host "Spec files:"
+          $specs = Get-ChildItem -Recurse -Filter *.spec
+          $specs | ForEach-Object { Write-Host " - $($_.FullName)" }
+          if (-not (Test-Path ".\dalevision-edge-agent.spec")) {
+            throw "Spec file not found: .\dalevision-edge-agent.spec"
+          }
+
       - name: Build executable
         run: |
-          pyinstaller dalevision-edge-agent.spec
+          pyinstaller .\dalevision-edge-agent.spec
 
       - name: Package ZIP
         run: |
