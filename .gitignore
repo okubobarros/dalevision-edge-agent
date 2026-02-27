@@ -209,3 +209,7 @@ __marimo__/
 
 # Codex prompts
 docs/sequential_thinking_prompt.md
+
+# Edge release artifacts
+release/win/
+dalevision-edge-agent-windows.zip
