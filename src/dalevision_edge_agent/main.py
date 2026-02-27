@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import threading
 from typing import Any
 
 from .cameras import (
@@ -30,6 +31,7 @@ from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import run_scan
 from .update import apply_update_if_possible, check_for_update, download_update
+from .vision.worker import VisionWorker
 
 BACKOFF_SECONDS = [2, 5, 10, 20, 30]
 LOG_MAX_BYTES = 2 * 1024 * 1024
@@ -340,6 +342,22 @@ def main() -> int:
 
     url = f"{settings.cloud_base_url}/api/edge/events/"
     version = _get_version()
+
+    # --- Vision worker (optional) ---
+    vision = None
+    try:
+        vision = VisionWorker(
+            cloud_base_url=settings.cloud_base_url,
+            store_id=settings.store_id,
+            edge_token=settings.edge_token,
+            logger=logger,
+        )
+        if vision.cfg.enabled:
+            t = threading.Thread(target=vision.run_forever, daemon=True)
+            t.start()
+            logger.info("VISION worker started")
+    except Exception as exc:
+        logger.warning("VISION worker failed to start: %s", exc)
 
     if args.once:
         return _run_once(

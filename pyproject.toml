@@ -18,6 +18,11 @@ dependencies = [
 dev = [
   "pytest>=7.4.0",
 ]
+vision = [
+  "ultralytics>=8.3.0",
+  "opencv-python>=4.8.1.78",
+  "numpy>=1.26.4",
+]
 
 [project.scripts]
 dalevision-edge-agent = "dalevision_edge_agent.main:main"
