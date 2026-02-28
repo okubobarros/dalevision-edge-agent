@@ -49,6 +49,20 @@ class VisionConfig:
     max_cameras: int = 10
     snapshot_timeout_seconds: int = 10
     role_map: Dict[str, str] = field(default_factory=dict)
+    alerts_enabled: bool = False
+    inactivity_seconds: int = 120
+    inactivity_cooldown_seconds: int = 300
+    queue_size_threshold: int = 3
+    queue_wait_seconds: int = 60
+    queue_cooldown_seconds: int = 180
+    phone_enabled: bool = False
+    phone_seconds: int = 30
+    phone_cooldown_seconds: int = 300
+    phone_class_id: int = 67
+    blur_enabled: bool = True
+    blur_strength: int = 41
+    embed_thumbnail: bool = False
+    thumbnail_width: int = 320
 
     @staticmethod
     def from_env() -> "VisionConfig":
@@ -65,6 +79,20 @@ class VisionConfig:
             max_cameras=int(os.getenv("VISION_MAX_CAMERAS", "10")),
             snapshot_timeout_seconds=int(os.getenv("VISION_SNAPSHOT_TIMEOUT_SECONDS", "10")),
             role_map=role_map if isinstance(role_map, dict) else {},
+            alerts_enabled=os.getenv("VISION_ALERTS_ENABLED", "0") == "1",
+            inactivity_seconds=int(os.getenv("VISION_INACTIVITY_SECONDS", "120")),
+            inactivity_cooldown_seconds=int(os.getenv("VISION_INACTIVITY_COOLDOWN_SECONDS", "300")),
+            queue_size_threshold=int(os.getenv("VISION_QUEUE_SIZE_THRESHOLD", "3")),
+            queue_wait_seconds=int(os.getenv("VISION_QUEUE_WAIT_SECONDS", "60")),
+            queue_cooldown_seconds=int(os.getenv("VISION_QUEUE_COOLDOWN_SECONDS", "180")),
+            phone_enabled=os.getenv("VISION_PHONE_ENABLED", "0") == "1",
+            phone_seconds=int(os.getenv("VISION_PHONE_SECONDS", "30")),
+            phone_cooldown_seconds=int(os.getenv("VISION_PHONE_COOLDOWN_SECONDS", "300")),
+            phone_class_id=int(os.getenv("VISION_PHONE_CLASS_ID", "67")),
+            blur_enabled=os.getenv("VISION_BLUR_ENABLED", "1") == "1",
+            blur_strength=int(os.getenv("VISION_BLUR_STRENGTH", "41")),
+            embed_thumbnail=os.getenv("VISION_EMBED_THUMBNAIL", "0") == "1",
+            thumbnail_width=int(os.getenv("VISION_THUMBNAIL_WIDTH", "320")),
         )
 
 
@@ -144,6 +172,10 @@ class VisionWorker:
             "track_line_last_event": {},
             "checkout_cycle": {"in_cycle": False, "interaction_start": None, "last_checkout": -1e9},
             "model": None,
+            "idle_start_ts": None,
+            "queue_start_ts": None,
+            "phone_start_ts": None,
+            "last_alert_ts": {},
         }
 
     def _fresh_agg(self) -> dict:
@@ -241,16 +273,27 @@ class VisionWorker:
         clients_at_pay = 0
         staff_at_cashier = 0
 
+        phone_in_staff_zone = False
         if results and results.get("boxes"):
             for item in results["boxes"]:
                 x1, y1, x2, y2, cls = item
-                if cls != 0:
+                is_person = cls == 0
+                is_phone = cls == self.cfg.phone_class_id
+                if not is_person and not is_phone:
                     continue
                 cx = int((x1 + x2) / 2)
                 foot_y = int(y2)
                 center_y = int((y1 + y2) / 2)
 
                 if role == "balcao":
+                    if is_phone and self.cfg.phone_enabled:
+                        if "zona_funcionario_caixa" in zones and point_in_polygon(
+                            cx, center_y, zones["zona_funcionario_caixa"]
+                        ):
+                            phone_in_staff_zone = True
+                        continue
+                    if not is_person:
+                        continue
                     in_pay = "ponto_pagamento" in zones and point_in_polygon(cx, center_y, zones["ponto_pagamento"])
                     if in_pay:
                         clients_at_pay += 1
@@ -260,6 +303,8 @@ class VisionWorker:
                         if not (in_pay and _env_str("EXCLUDE_PAY_FROM_QUEUE", "1") == "1"):
                             fila_count += 1
                 elif role == "salao":
+                    if not is_person:
+                        continue
                     if "area_consumo" in zones and point_in_polygon(cx, foot_y, zones["area_consumo"]):
                         consumo_count += 1
                 elif role == "entrada":
@@ -276,11 +321,171 @@ class VisionWorker:
             agg["consumo_sum"] += consumo_count
             agg["consumo_max"] = max(agg["consumo_max"], consumo_count)
 
+        if self.cfg.alerts_enabled and role == "balcao":
+            self._handle_alerts(
+                state=state,
+                cam=cam,
+                ts=ts,
+                fila_count=fila_count,
+                staff_active=staff_at_cashier,
+                clients_at_pay=clients_at_pay,
+                phone_in_staff_zone=phone_in_staff_zone,
+                frame=frame,
+            )
+
         return {
             "fila_count": fila_count,
             "consumo_count": consumo_count,
             "staff_active": staff_at_cashier,
         }
+
+    def _handle_alerts(
+        self,
+        *,
+        state: dict,
+        cam: dict,
+        ts: float,
+        fila_count: int,
+        staff_active: int,
+        clients_at_pay: int,
+        phone_in_staff_zone: bool,
+        frame,
+    ) -> None:
+        now_ts = ts
+        last_alert_ts = state["last_alert_ts"]
+
+        idle_start = state.get("idle_start_ts")
+        if staff_active >= 1 and fila_count == 0 and clients_at_pay == 0:
+            if idle_start is None:
+                state["idle_start_ts"] = now_ts
+            idle_duration = now_ts - (state["idle_start_ts"] or now_ts)
+            if idle_duration >= self.cfg.inactivity_seconds:
+                if self._cooldown_ok(last_alert_ts, "employee_inactivity", self.cfg.inactivity_cooldown_seconds, now_ts):
+                    self._emit_alert(
+                        cam=cam,
+                        event_type="employee_inactivity",
+                        severity="warning",
+                        title="Ociosidade detectada",
+                        description=f"Equipe ociosa por {int(idle_duration)}s.",
+                        metadata={"duration_seconds": int(idle_duration), "staff_active_est": staff_active},
+                        ts=now_ts,
+                        frame=frame,
+                    )
+                    last_alert_ts["employee_inactivity"] = now_ts
+        else:
+            state["idle_start_ts"] = None
+
+        queue_start = state.get("queue_start_ts")
+        if fila_count >= self.cfg.queue_size_threshold:
+            if queue_start is None:
+                state["queue_start_ts"] = now_ts
+            queue_duration = now_ts - (state["queue_start_ts"] or now_ts)
+            if queue_duration >= self.cfg.queue_wait_seconds:
+                if self._cooldown_ok(last_alert_ts, "queue_long", self.cfg.queue_cooldown_seconds, now_ts):
+                    self._emit_alert(
+                        cam=cam,
+                        event_type="queue_long",
+                        severity="warning",
+                        title="Fila longa detectada",
+                        description=f"Fila com {fila_count} pessoas por {int(queue_duration)}s.",
+                        metadata={"queue_size": fila_count, "queue_wait_seconds": int(queue_duration)},
+                        ts=now_ts,
+                        frame=frame,
+                    )
+                    last_alert_ts["queue_long"] = now_ts
+        else:
+            state["queue_start_ts"] = None
+
+        if self.cfg.phone_enabled:
+            if phone_in_staff_zone:
+                if state.get("phone_start_ts") is None:
+                    state["phone_start_ts"] = now_ts
+                phone_duration = now_ts - (state.get("phone_start_ts") or now_ts)
+                if phone_duration >= self.cfg.phone_seconds:
+                    if self._cooldown_ok(last_alert_ts, "phone_usage", self.cfg.phone_cooldown_seconds, now_ts):
+                        self._emit_alert(
+                            cam=cam,
+                            event_type="phone_usage",
+                            severity="warning",
+                            title="Uso de celular detectado",
+                            description=f"Uso de celular por ~{int(phone_duration)}s na zona de atendimento.",
+                            metadata={"duration_seconds": int(phone_duration)},
+                            ts=now_ts,
+                            frame=frame,
+                        )
+                        last_alert_ts["phone_usage"] = now_ts
+                        state["phone_start_ts"] = None
+            else:
+                state["phone_start_ts"] = None
+
+    def _cooldown_ok(self, last_alert_ts: dict, key: str, cooldown: int, now_ts: float) -> bool:
+        last_ts = float(last_alert_ts.get(key) or 0)
+        return (now_ts - last_ts) >= cooldown
+
+    def _emit_alert(
+        self,
+        *,
+        cam: dict,
+        event_type: str,
+        severity: str,
+        title: str,
+        description: str,
+        metadata: dict,
+        ts: float,
+        frame,
+    ) -> None:
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+        receipt_id = _sha256(f"{event_type}|{self.store_id}|{camera_id}|{int(ts)}")
+        payload = {
+            "store_id": self.store_id,
+            "camera_id": camera_id,
+            "event_type": event_type,
+            "severity": severity,
+            "title": title,
+            "description": description,
+            "metadata": metadata,
+            "occurred_at": _iso(ts),
+        }
+        if self.cfg.embed_thumbnail and frame is not None:
+            thumb = self._build_thumbnail(frame)
+            if thumb:
+                payload["metadata"] = {**metadata, "thumbnail_base64": thumb, "thumbnail_blurred": True}
+        self._send_alert_event(payload, receipt_id=receipt_id)
+
+    def _build_thumbnail(self, frame) -> Optional[str]:
+        try:
+            import cv2
+            h, w = frame.shape[:2]
+            if self.cfg.blur_enabled:
+                k = max(3, int(self.cfg.blur_strength) | 1)
+                frame = cv2.GaussianBlur(frame, (k, k), 0)
+            target_w = max(160, self.cfg.thumbnail_width)
+            scale = target_w / max(w, 1)
+            frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
+            ok, buffer = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            if not ok:
+                return None
+            import base64
+            return base64.b64encode(buffer.tobytes()).decode("utf-8")
+        except Exception:
+            return None
+
+    def _send_alert_event(self, payload: dict, *, receipt_id: str):
+        envelope = {
+            "event_name": "alert",
+            "event_type": payload.get("event_type"),
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "ts": payload.get("occurred_at"),
+            "data": payload,
+        }
+        url = f"{self.cloud_base_url}/api/edge/events/"
+        headers = {"X-EDGE-TOKEN": self.edge_token}
+        try:
+            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
+            self.logger.info("[VISION] alert sent status=%s type=%s", resp.status_code, payload.get("event_type"))
+        except Exception as exc:
+            self.logger.warning("[VISION] alert send failed: %s", exc)
 
     def _yolo_track(self, state: dict, frame) -> Optional[dict]:
         try:
