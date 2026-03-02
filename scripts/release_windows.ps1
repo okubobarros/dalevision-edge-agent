@@ -25,6 +25,7 @@ function Assert-FileExists {
 # 1) validar fontes obrigatorias
 $requiredSources = @(
   @{ Path = $distExe; Label = "dalevision-edge-agent.exe (dist)" },
+  @{ Path = $envTemplatePath; Label = ".env.template" },
   @{ Path = (Join-Path $releaseRoot "README.txt"); Label = "README.txt" },
   @{ Path = (Join-Path $releaseRoot "01_TESTE_RAPIDO.bat"); Label = "01_TESTE_RAPIDO.bat" },
   @{ Path = (Join-Path $releaseRoot "02_INSTALAR_AUTOSTART.bat"); Label = "02_INSTALAR_AUTOSTART.bat" },
@@ -58,6 +59,9 @@ Copy-Item (Join-Path $releaseRoot "03_VERIFICAR_STATUS.bat") (Join-Path $release
 Copy-Item (Join-Path $releaseRoot "04_REMOVER_AUTOSTART.bat") (Join-Path $releaseWin "04_REMOVER_AUTOSTART.bat") -Force
 Copy-Item (Join-Path $releaseRoot "Diagnose.bat") (Join-Path $releaseWin "Diagnose.bat") -Force
 Copy-Item (Join-Path $releaseRoot "run_agent.cmd") (Join-Path $releaseWin "run_agent.cmd") -Force
+
+# 3.5) gerar .env a partir do template
+Copy-Item $envTemplatePath (Join-Path $releaseWin ".env") -Force
 
 $scriptsDir = Join-Path $releaseWin "scripts"
 $internalDir = Join-Path $scriptsDir "internal"
@@ -110,6 +114,7 @@ Write-Host "SHA256 scripts/install-service.ps1: $((Get-FileHash -Algorithm SHA25
 
 $required = @(
   "dalevision-edge-agent.exe",
+  ".env",
   "01_TESTE_RAPIDO.bat",
   "02_INSTALAR_AUTOSTART.bat",
   "03_VERIFICAR_STATUS.bat",
@@ -129,9 +134,6 @@ $missing = $required | Where-Object { -not (Test-Path (Join-Path $releaseWin $_)
 if ($missing.Count -gt 0) {
   throw "Missing required files in release\win: $($missing -join ', ')"
 }
-if (Test-Path (Join-Path $releaseWin ".env.template")) {
-  throw "Unexpected .env.template in release\win. Use .env only."
-}
 
 # 5.5) validar staging/release nao contem arquivos proibidos
 $forbiddenPatterns = @(
@@ -146,8 +148,6 @@ $forbiddenPatterns = @(
   "*.mkv",
   "yolov8*.pt",
   "*.pt",
-  "*.env",
-  ".env",
   "*.log"
 )
 $forbiddenFound = @()
@@ -183,8 +183,6 @@ $forbiddenZipPatterns = @(
   "\\.(mp4|avi|mov|mkv)$",
   "^yolov8.*\\.pt$",
   "\\.pt$",
-  "(^|/)\\.env$",
-  "\\.env$",
   "\\.log$"
 )
 $foundForbiddenZip = @()
