@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 import threading
+import traceback
 from typing import Any
 
 from .cameras import (
@@ -145,6 +146,29 @@ def _parse_args() -> argparse.Namespace:
 
     parser.set_defaults(command="run")
     return parser.parse_args()
+
+
+def _parse_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Invalid boolean for {name}: {raw}")
+
+
+def _auto_set_vision_model_path(logger: logging.Logger) -> None:
+    if os.getenv("VISION_MODEL_PATH"):
+        return
+    model_path = Path("C:\\ProgramData\\DaleVision\\models\\yolov8n.pt")
+    if model_path.exists():
+        os.environ["VISION_MODEL_PATH"] = str(model_path)
+        logger.info("VISION_MODEL_PATH auto-set to %s", model_path)
+        return
+    logger.warning("modelo nao encontrado localmente; pode baixar da internet.")
 
 
 def _run_once(
@@ -339,12 +363,38 @@ def main() -> int:
             pending.unlink(missing_ok=True)
         logger.info("UPD040 update finalized from %s", args.updated_from)
     detect_snapshot_support(logger)
+    _auto_set_vision_model_path(logger)
 
     url = f"{settings.cloud_base_url}/api/edge/events/"
     version = _get_version()
 
+    vision_source = (os.getenv("VISION_SOURCE") or "rtsp").strip().lower()
+    camera_sync_enabled_raw = os.getenv("CAMERA_SYNC_ENABLED")
+    camera_sync_enabled = _parse_bool_env("CAMERA_SYNC_ENABLED", True)
+    if vision_source == "video" and (camera_sync_enabled_raw is None or camera_sync_enabled_raw.strip() == ""):
+        camera_sync_enabled = False
+    camera_sync_fatal = _parse_bool_env("CAMERA_SYNC_FATAL", True)
+    logger.info(
+        "Camera sync config enabled=%s fatal=%s vision_source=%s",
+        camera_sync_enabled,
+        camera_sync_fatal,
+        vision_source,
+    )
+
     # --- Vision worker (optional) ---
     vision = None
+    if os.getenv("VISION_ENABLED", "0") == "1":
+        msg = (
+            "[VISION] starting worker... "
+            f"VISION_ENABLED={os.getenv('VISION_ENABLED','')} "
+            f"VISION_SOURCE={os.getenv('VISION_SOURCE','')} "
+            f"VISION_VIDEO_PATH={os.getenv('VISION_VIDEO_PATH','')} "
+            f"VISION_ROI_PATH={os.getenv('VISION_ROI_PATH','')} "
+            f"VISION_MODEL_PATH={os.getenv('VISION_MODEL_PATH','')} "
+            f"VISION_FRAME_STRIDE={os.getenv('VISION_FRAME_STRIDE','')}"
+        )
+        print(msg)
+        logger.info(msg)
     try:
         vision = VisionWorker(
             cloud_base_url=settings.cloud_base_url,
@@ -353,11 +403,21 @@ def main() -> int:
             logger=logger,
         )
         if vision.cfg.enabled:
-            t = threading.Thread(target=vision.run_forever, daemon=True)
+            def _vision_runner():
+                reason = "completed"
+                try:
+                    vision.run_forever()
+                except Exception:
+                    reason = "exception"
+                    logger.error("[VISION] worker crashed:\n%s", traceback.format_exc())
+                finally:
+                    logger.warning("[VISION] worker thread exited reason=%s", reason)
+
+            t = threading.Thread(target=_vision_runner, daemon=True)
             t.start()
             logger.info("VISION worker started")
-    except Exception as exc:
-        logger.warning("VISION worker failed to start: %s", exc)
+    except Exception:
+        logger.error("[VISION] worker failed to start:\n%s", traceback.format_exc())
 
     if args.once:
         return _run_once(
@@ -382,7 +442,7 @@ def main() -> int:
 
     while True:
         now = time.time()
-        if now - last_camera_sync_at >= camera_sync_interval:
+        if camera_sync_enabled and now - last_camera_sync_at >= camera_sync_interval:
             cameras, cameras_error = fetch_cameras(
                 cloud_base_url=settings.cloud_base_url,
                 edge_token=settings.edge_token,
@@ -399,7 +459,10 @@ def main() -> int:
                     )
                     print(message)
                     logger.error(message)
-                    return EXIT_AUTH_ERROR
+                    if camera_sync_fatal:
+                        return EXIT_AUTH_ERROR
+                    logger.warning("Camera sync fatal disabled (CAMERA_SYNC_FATAL=0).")
+                    camera_auth_tracker.reset()
             else:
                 fresh_states: dict[str, dict[str, Any]] = {}
                 active_cameras = [c for c in cameras if _is_camera_active(c)]
@@ -520,7 +583,10 @@ def main() -> int:
                             )
                             print(message)
                             logger.error(message)
-                            return EXIT_AUTH_ERROR
+                            if camera_sync_fatal:
+                                return EXIT_AUTH_ERROR
+                            logger.warning("Camera sync fatal disabled (CAMERA_SYNC_FATAL=0).")
+                            camera_auth_tracker.reset()
                         health["roi_version"] = roi_version
                         health["roi_cached"] = cached
                         fresh_states[camera_id] = health
@@ -553,7 +619,10 @@ def main() -> int:
                             )
                             print(message)
                             logger.error(message)
-                            return EXIT_AUTH_ERROR
+                            if camera_sync_fatal:
+                                return EXIT_AUTH_ERROR
+                            logger.warning("Camera sync fatal disabled (CAMERA_SYNC_FATAL=0).")
+                            camera_auth_tracker.reset()
                     except Exception as exc:
                         logger.exception("camera_id=%s unexpected failure: %s", camera_id, exc)
                         fresh_states[camera_id] = {
@@ -564,6 +633,9 @@ def main() -> int:
                             "roi_version": None,
                         }
                 camera_states = fresh_states
+            last_camera_sync_at = now
+        elif not camera_sync_enabled and now - last_camera_sync_at >= camera_sync_interval:
+            logger.info("Camera sync disabled (CAMERA_SYNC_ENABLED=0)")
             last_camera_sync_at = now
 
         camera_fields = build_camera_heartbeat_fields(camera_states)

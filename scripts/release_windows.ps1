@@ -8,7 +8,6 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $releaseRoot = Join-Path $repoRoot "release"
 $releaseWin = Join-Path $releaseRoot "win"
 $distExe = Join-Path $repoRoot "dist\dalevision-edge-agent.exe"
-$envFile = Join-Path $releaseRoot ".env"
 $envTemplatePath = Join-Path $releaseRoot ".env.template"
 $buildInfoPath = Join-Path $releaseWin "BUILD_INFO.txt"
 
@@ -20,20 +19,6 @@ function Assert-FileExists {
 
   if (-not (Test-Path $Path)) {
     throw "Missing required source file: $Label ($Path)"
-  }
-}
-
-# 0) garantir .env (CI pode nao ter)
-if (-not (Test-Path $envFile)) {
-  if (Test-Path $envTemplatePath) {
-    Copy-Item $envTemplatePath $envFile -Force
-  } else {
-    @(
-      "CLOUD_BASE_URL=",
-      "STORE_ID=",
-      "EDGE_TOKEN=",
-      "AGENT_ID="
-    ) | Set-Content -Path $envFile
   }
 }
 
@@ -73,7 +58,6 @@ Copy-Item (Join-Path $releaseRoot "03_VERIFICAR_STATUS.bat") (Join-Path $release
 Copy-Item (Join-Path $releaseRoot "04_REMOVER_AUTOSTART.bat") (Join-Path $releaseWin "04_REMOVER_AUTOSTART.bat") -Force
 Copy-Item (Join-Path $releaseRoot "Diagnose.bat") (Join-Path $releaseWin "Diagnose.bat") -Force
 Copy-Item (Join-Path $releaseRoot "run_agent.cmd") (Join-Path $releaseWin "run_agent.cmd") -Force
-Copy-Item $envFile (Join-Path $releaseWin ".env") -Force
 
 $scriptsDir = Join-Path $releaseWin "scripts"
 $internalDir = Join-Path $scriptsDir "internal"
@@ -84,12 +68,6 @@ Copy-Item (Join-Path $repoRoot "scripts\verify-service.ps1") (Join-Path $scripts
 Copy-Item (Join-Path $repoRoot "scripts\update.ps1") (Join-Path $scriptsDir "update.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1") (Join-Path $internalDir "Start_DaleVision_Agent.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat") (Join-Path $internalDir "Start_DaleVision_Agent.bat") -Force
-
-# 4) logs/.keep
-$logDir = Join-Path $releaseWin "logs"
-New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-New-Item -ItemType File -Path (Join-Path $logDir "agent.log") -Force | Out-Null
-New-Item -ItemType File -Path (Join-Path $logDir "update.log") -Force | Out-Null
 
 # 4.1) BUILD_INFO.txt
 $buildTimestamp = Get-Date -Format o
@@ -140,9 +118,6 @@ $required = @(
   "run_agent.cmd",
   "BUILD_INFO.txt",
   "README.txt",
-  ".env",
-  "logs/agent.log",
-  "logs/update.log",
   "scripts/install-service.ps1",
   "scripts/uninstall-service.ps1",
   "scripts/verify-service.ps1",
@@ -156,6 +131,32 @@ if ($missing.Count -gt 0) {
 }
 if (Test-Path (Join-Path $releaseWin ".env.template")) {
   throw "Unexpected .env.template in release\win. Use .env only."
+}
+
+# 5.5) validar staging/release nao contem arquivos proibidos
+$forbiddenPatterns = @(
+  "tools\\*",
+  "outputs\\*",
+  "configs\\*",
+  "videos\\*",
+  "edge-agent\\config\\rois\\*.yaml",
+  "*.mp4",
+  "*.avi",
+  "*.mov",
+  "*.mkv",
+  "yolov8*.pt",
+  "*.pt",
+  "*.env",
+  ".env",
+  "*.log"
+)
+$forbiddenFound = @()
+foreach ($pattern in $forbiddenPatterns) {
+  $forbiddenFound += Get-ChildItem -Path $releaseWin -Recurse -Force -Filter $pattern -ErrorAction SilentlyContinue
+}
+if ($forbiddenFound.Count -gt 0) {
+  $paths = $forbiddenFound | Select-Object -ExpandProperty FullName
+  throw "Release staging contains forbidden files:`n$($paths -join "`n")"
 }
 
 # 6) zipar
@@ -173,8 +174,30 @@ $missingZip = $required | Where-Object { $names -notcontains $_ }
 if ($missingZip.Count -gt 0) {
   throw "Missing required files in ZIP: $($missingZip -join ', ')"
 }
-if ($names -contains ".env.template") {
-  throw "ZIP contains .env.template (should include only .env)."
+$forbiddenZipPatterns = @(
+  "^tools/",
+  "^videos/",
+  "^outputs/",
+  "^configs/",
+  "^edge-agent/config/rois/.*\\.yaml$",
+  "\\.(mp4|avi|mov|mkv)$",
+  "^yolov8.*\\.pt$",
+  "\\.pt$",
+  "(^|/)\\.env$",
+  "\\.env$",
+  "\\.log$"
+)
+$foundForbiddenZip = @()
+foreach ($entry in $names) {
+  foreach ($pattern in $forbiddenZipPatterns) {
+    if ($entry -match $pattern) {
+      $foundForbiddenZip += $entry
+      break
+    }
+  }
+}
+if ($foundForbiddenZip.Count -gt 0) {
+  throw "ZIP contains forbidden files: $($foundForbiddenZip -join ', ')"
 }
 $rootPs1 = $names | Where-Object { $_.EndsWith(".ps1") -and -not $_.StartsWith("scripts/") }
 if ($rootPs1.Count -gt 0) {

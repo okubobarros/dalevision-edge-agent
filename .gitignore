@@ -213,3 +213,21 @@ docs/sequential_thinking_prompt.md
 # Edge release artifacts
 release/win/
 dalevision-edge-agent-windows.zip
+
+# Local dev videos/outputs
+videos/
+outputs/
+
+# --- dev tools / local artifacts ---
+tools/
+outputs/
+configs/*.yaml
+*.mp4
+*.avi
+*.mov
+*.mkv
+yolov8*.pt
+*.pt
+.venv/
+__pycache__/
+*.log

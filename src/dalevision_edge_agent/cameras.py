@@ -58,6 +58,13 @@ def _headers(edge_token: str) -> dict[str, str]:
     return {"X-EDGE-TOKEN": edge_token}
 
 
+def _format_auth_header_debug(headers: dict[str, str]) -> str:
+    token = headers.get("X-EDGE-TOKEN") or ""
+    prefix = token[:6] if token else ""
+    length = len(token)
+    return f"X-EDGE-TOKEN prefix={prefix} len={length}"
+
+
 def _extract_camera_id(camera: dict[str, Any]) -> str:
     return str(
         camera.get("camera_id")
@@ -145,9 +152,9 @@ def _request_json_with_backoff(
                     return response.json(), status, None
                 except Exception:
                     return {}, status, None
-            if auth_tracker and auth_tracker.register(status):
-                return None, status, "auth_failure_threshold"
             text = response.text.strip()[:500] if response.text else ""
+            if auth_tracker and auth_tracker.register(status):
+                return None, status, text or "auth_failure_threshold"
             return None, status, text or f"HTTP {status}"
         except requests.RequestException as exc:
             last_error = str(exc)
@@ -177,6 +184,7 @@ def fetch_cameras(
     logger = logger or logging.getLogger("dalevision-edge-agent")
     base_url = _normalize_base_url(cloud_base_url)
     headers = _headers(edge_token)
+    auth_debug = _format_auth_header_debug(headers)
 
     for endpoint in CAMERA_LIST_ENDPOINTS:
         path = endpoint.format(store_id=store_id)
@@ -193,10 +201,11 @@ def fetch_cameras(
         )
         if payload is None:
             logger.warning(
-                "Camera list fetch failed on %s (status=%s error=%s)",
+                "Camera list fetch failed url=%s status=%s error=%s auth=%s",
                 url,
                 status,
                 error,
+                auth_debug,
             )
             continue
 

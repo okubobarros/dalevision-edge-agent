@@ -6,11 +6,14 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
 
 from .geometry import line_side, point_in_polygon
+from .roi_yaml import load_roi_yaml
+from .sources.video import VideoFrameSource
 
 
 def _now_ts() -> float:
@@ -44,6 +47,7 @@ def _env_str(name: str, default: str) -> str:
 @dataclass
 class VisionConfig:
     enabled: bool = False
+    source: str = "rtsp"
     bucket_seconds: int = 30
     poll_seconds: int = 5
     max_cameras: int = 10
@@ -63,6 +67,13 @@ class VisionConfig:
     blur_strength: int = 41
     embed_thumbnail: bool = False
     thumbnail_width: int = 320
+    frame_stride: int = 1
+    video_path: str = ""
+    video_realtime: bool = False
+    video_loop: bool = False
+    roi_path: str = ""
+    video_camera_id: str = ""
+    video_role: str = ""
 
     @staticmethod
     def from_env() -> "VisionConfig":
@@ -74,6 +85,7 @@ class VisionConfig:
             role_map = {}
         return VisionConfig(
             enabled=os.getenv("VISION_ENABLED", "0") == "1",
+            source=os.getenv("VISION_SOURCE", "rtsp").strip().lower() or "rtsp",
             bucket_seconds=int(os.getenv("VISION_BUCKET_SECONDS", "30")),
             poll_seconds=int(os.getenv("VISION_POLL_SECONDS", "5")),
             max_cameras=int(os.getenv("VISION_MAX_CAMERAS", "10")),
@@ -93,6 +105,13 @@ class VisionConfig:
             blur_strength=int(os.getenv("VISION_BLUR_STRENGTH", "41")),
             embed_thumbnail=os.getenv("VISION_EMBED_THUMBNAIL", "0") == "1",
             thumbnail_width=int(os.getenv("VISION_THUMBNAIL_WIDTH", "320")),
+            frame_stride=max(1, int(os.getenv("VISION_FRAME_STRIDE", "1"))),
+            video_path=os.getenv("VISION_VIDEO_PATH", "").strip(),
+            video_realtime=os.getenv("VISION_VIDEO_REALTIME", "0") == "1",
+            video_loop=os.getenv("VISION_VIDEO_LOOP", "0") == "1",
+            roi_path=os.getenv("VISION_ROI_PATH", "").strip(),
+            video_camera_id=os.getenv("VISION_CAMERA_ID", "").strip(),
+            video_role=os.getenv("VISION_ROLE", "").strip().lower(),
         )
 
 
@@ -106,6 +125,21 @@ class VisionWorker:
         self._stop = threading.Event()
 
         self._camera_states: Dict[str, dict] = {}
+        self._roi_override: Optional[dict] = None
+        self._roi_cache: Dict[str, dict] = {}
+        self._roi_path_by_camera: Dict[str, str] = {}
+        if self.cfg.roi_path:
+            try:
+                zones, lines = load_roi_yaml(self.cfg.roi_path)
+                self._roi_override = {"zones": zones, "lines": lines}
+                self.logger.info("[VISION] ROI override loaded from %s", self.cfg.roi_path)
+                for name, pts in zones.items():
+                    self.logger.info("[VISION] ROI zone=%s points=%s", name, len(pts))
+                for name, pts in lines.items():
+                    self.logger.info("[VISION] ROI line=%s points=%s", name, len(pts))
+            except Exception as exc:
+                self.logger.warning("[VISION] ROI override failed: %s", exc)
+                self._roi_override = None
 
     def stop(self):
         self._stop.set()
@@ -113,6 +147,10 @@ class VisionWorker:
     def run_forever(self):
         if not self.cfg.enabled:
             self.logger.info("[VISION] disabled (VISION_ENABLED=0)")
+            return
+        self._log_startup_info()
+        if self.cfg.source == "video":
+            self._run_video_forever()
             return
         self.logger.info("[VISION] worker started (bucket=%ss)", self.cfg.bucket_seconds)
         while not self._stop.is_set():
@@ -155,6 +193,7 @@ class VisionWorker:
                 state["bucket_start"] = bucket_start
             if bucket_start != state["bucket_start"]:
                 payload = self._build_payload(cam, state, metrics, state["bucket_start"], bucket_start)
+                self._log_bucket_summary(payload, state)
                 self._send_event(payload)
                 state["bucket_start"] = bucket_start
                 state["agg"] = self._fresh_agg()
@@ -176,11 +215,16 @@ class VisionWorker:
             "queue_start_ts": None,
             "phone_start_ts": None,
             "last_alert_ts": {},
+            "roi_lines_count": 0,
         }
 
     def _fresh_agg(self) -> dict:
         return {
             "frames": 0,
+            "frames_processed_for_detection": 0,
+            "frames_with_detections": 0,
+            "detections_sum": 0,
+            "line_crossings_count": None,
             "fila_sum": 0,
             "fila_max": 0,
             "consumo_sum": 0,
@@ -191,7 +235,55 @@ class VisionWorker:
             "staff_active_est": 0,
         }
 
+    def _run_video_forever(self) -> None:
+        if not self.cfg.video_path:
+            self.logger.warning("[VISION] video source selected but VISION_VIDEO_PATH is empty")
+            return
+        cam = self._build_video_camera()
+        if cam is None:
+            self.logger.warning("[VISION] video source missing role or ROI; skipping")
+            return
+        role = cam.get("role")
+        if not role:
+            self.logger.warning("[VISION] video source missing role; skipping")
+            return
+        state = self._init_camera_state(role)
+        source = VideoFrameSource(
+            path=self.cfg.video_path,
+            realtime=self.cfg.video_realtime,
+            loop=self.cfg.video_loop,
+            logger=self.logger,
+        )
+        last_ts: Optional[float] = None
+        try:
+            for frame, ts in source.frames():
+                if self._stop.is_set():
+                    break
+                last_ts = ts
+                bucket_start = _bucket_start(ts, self.cfg.bucket_seconds)
+                metrics = self._process_frame(state, cam, frame, ts)
+                if metrics is None:
+                    continue
+                if state["bucket_start"] is None:
+                    state["bucket_start"] = bucket_start
+                if bucket_start != state["bucket_start"]:
+                    payload = self._build_payload(cam, state, metrics, state["bucket_start"], bucket_start)
+                    self._log_bucket_summary(payload, state)
+                    self._send_event(payload)
+                    state["bucket_start"] = bucket_start
+                    state["agg"] = self._fresh_agg()
+        except Exception as exc:
+            self.logger.warning("[VISION] video loop failed: %s", exc)
+
+        if last_ts is not None and state["bucket_start"] is not None:
+            bucket_end = state["bucket_start"] + self.cfg.bucket_seconds
+            payload = self._build_payload(cam, state, {}, state["bucket_start"], bucket_end)
+            self._log_bucket_summary(payload, state)
+            self._send_event(payload)
+
     def _fetch_cameras(self) -> List[dict]:
+        if self.cfg.source == "video":
+            return []
         url = f"{self.cloud_base_url}/api/v1/stores/{self.store_id}/cameras/"
         headers = {"X-EDGE-TOKEN": self.edge_token}
         try:
@@ -203,12 +295,29 @@ class VisionWorker:
                     )
                 self.logger.warning("[VISION] cameras list failed %s %s", resp.status_code, resp.text[:200])
                 return []
-            return resp.json() or []
+            cameras = resp.json() or []
+            if self._roi_override:
+                if len(cameras) > 1:
+                    self.logger.warning(
+                        "[VISION] ROI override active with %s cameras; applying to all",
+                        len(cameras),
+                    )
+                for cam in cameras:
+                    cam["roi_local"] = self._roi_override
+            else:
+                for cam in cameras:
+                    camera_id = str(cam.get("camera_id") or cam.get("id") or "").strip()
+                    if not camera_id:
+                        continue
+                    cam["roi_local"] = self._load_roi_for_camera(camera_id)
+            return cameras
         except Exception as exc:
             self.logger.warning("[VISION] cameras list exception: %s", exc)
             return []
 
     def _resolve_role(self, cam: dict) -> Optional[str]:
+        if cam.get("role"):
+            return str(cam.get("role"))
         name = str(cam.get("name") or "").lower()
         ext = str(cam.get("external_id") or "").lower()
         for role, key in self.cfg.role_map.items():
@@ -256,12 +365,21 @@ class VisionWorker:
 
     def _process_frame(self, state: dict, cam: dict, frame, ts: float) -> Optional[dict]:
         role = state["role"]
+        agg = state["agg"]
+        agg["frames"] += 1
+
+        stride = max(1, int(self.cfg.frame_stride))
+        if agg["frames"] % stride != 1:
+            return None
+
+        agg["frames_processed_for_detection"] += 1
         roi = self._extract_roi(cam, frame)
-        if not roi:
+        if roi is None:
             return None
 
         zones = roi["zones"]
         lines = roi["lines"]
+        state["roi_lines_count"] = len(lines)
 
         # MVP usa 1 frame por tick (RTSP ou snapshot).
         # Evoluir para tracking RTSP low-FPS para fluxo/checkout completo.
@@ -274,6 +392,7 @@ class VisionWorker:
         staff_at_cashier = 0
 
         phone_in_staff_zone = False
+        people_detections = 0
         if results and results.get("boxes"):
             for item in results["boxes"]:
                 x1, y1, x2, y2, cls = item
@@ -281,6 +400,8 @@ class VisionWorker:
                 is_phone = cls == self.cfg.phone_class_id
                 if not is_person and not is_phone:
                     continue
+                if is_person:
+                    people_detections += 1
                 cx = int((x1 + x2) / 2)
                 foot_y = int(y2)
                 center_y = int((y1 + y2) / 2)
@@ -312,7 +433,17 @@ class VisionWorker:
                     pass
 
         agg = state["agg"]
-        agg["frames"] += 1
+        agg["detections_sum"] += people_detections
+        if people_detections > 0:
+            agg["frames_with_detections"] += 1
+        if agg["frames"] % 30 == 0:
+            camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+            self.logger.info(
+                "[VISION] detections camera_id=%s frames=%s people_detections=%s",
+                camera_id,
+                agg["frames"],
+                people_detections,
+            )
         if role == "balcao":
             agg["fila_sum"] += fila_count
             agg["fila_max"] = max(agg["fila_max"], fila_count)
@@ -491,7 +622,10 @@ class VisionWorker:
         try:
             from ultralytics import YOLO
             if state.get("model") is None:
-                state["model"] = YOLO(_env_str("VISION_MODEL_PATH", "yolov8n.pt"))
+                model_path = _env_str("VISION_MODEL_PATH", "").strip()
+                if not model_path:
+                    model_path = "yolov8n.pt"
+                state["model"] = YOLO(model_path)
             res = state["model"].track(frame, persist=True, verbose=False, conf=0.35, iou=0.45)[0]
             if res.boxes is None:
                 return None
@@ -506,6 +640,21 @@ class VisionWorker:
             return None
 
     def _extract_roi(self, cam: dict, frame) -> Optional[dict]:
+        if cam.get("roi_local"):
+            roi_local = cam.get("roi_local") or {}
+            zones_raw = roi_local.get("zones") or {}
+            lines_raw = roi_local.get("lines") or {}
+            zones: Dict[str, List[List[int]]] = {}
+            for name, pts in zones_raw.items():
+                if not name or not pts:
+                    continue
+                zones[name] = [[int(p[0]), int(p[1])] for p in pts]
+            lines: Dict[str, List[List[int]]] = {}
+            for name, pts in lines_raw.items():
+                if not name or not pts or len(pts) != 2:
+                    continue
+                lines[name] = [[int(pts[0][0]), int(pts[0][1])], [int(pts[1][0]), int(pts[1][1])]]
+            return {"zones": zones, "lines": lines}
         config_json = cam.get("roi") or {}
         if not isinstance(config_json, dict):
             return None
@@ -538,6 +687,82 @@ class VisionWorker:
             return None
         return {"zones": zones, "lines": lines}
 
+    def _build_video_camera(self) -> Optional[dict]:
+        camera_id = self._get_video_camera_id()
+        roi = self._roi_override or self._load_roi_for_camera(camera_id)
+        role = self.cfg.video_role or self._infer_role_from_roi(roi.get("zones") or {}, roi.get("lines") or {})
+        name = self.cfg.video_camera_id or self.cfg.video_path
+        cam = {
+            "camera_id": camera_id,
+            "name": name,
+            "external_id": name,
+            "role": role,
+            "roi_local": roi,
+            "roi": {"roi_version": "local"},
+        }
+        return cam
+
+    def _get_video_camera_id(self) -> str:
+        return self.cfg.video_camera_id or _sha256(self.cfg.video_path)[:12]
+
+    def _programdata_roi_path(self, camera_id: str) -> Path:
+        import os
+        program_data = os.getenv("PROGRAMDATA") or "C:\\ProgramData"
+        base = Path(program_data) / "DaleVision" / "rois" / self.store_id
+        base.mkdir(parents=True, exist_ok=True)
+        return base / f"{camera_id}.yaml"
+
+    def _legacy_roi_path(self, camera_id: str) -> Path:
+        return Path.cwd() / "edge-agent" / "config" / "rois" / f"{camera_id}.yaml"
+
+    def _load_roi_for_camera(self, camera_id: str) -> dict:
+        if not camera_id:
+            return {"zones": {}, "lines": {}}
+        if camera_id in self._roi_cache:
+            return self._roi_cache[camera_id]
+
+        candidates: List[Path] = []
+        if self.cfg.roi_path:
+            candidates.append(Path(self.cfg.roi_path))
+        else:
+            candidates.append(self._programdata_roi_path(camera_id))
+            candidates.append(self._legacy_roi_path(camera_id))
+
+        for path in candidates:
+            try:
+                if path.exists():
+                    zones, lines = load_roi_yaml(str(path))
+                    roi = {"zones": zones, "lines": lines}
+                    self._roi_cache[camera_id] = roi
+                    self._roi_path_by_camera[camera_id] = str(path)
+                    self.logger.info(
+                        "[VISION] ROI loaded camera_id=%s path=%s zones=%s lines=%s",
+                        camera_id,
+                        path,
+                        len(zones),
+                        len(lines),
+                    )
+                    return roi
+            except Exception as exc:
+                self.logger.warning("[VISION] ROI load failed camera_id=%s path=%s error=%s", camera_id, path, exc)
+
+        effective_path = str(candidates[0]) if candidates else ""
+        self._roi_path_by_camera[camera_id] = effective_path
+        self.logger.warning("[VISION] ROI not found camera_id=%s; using empty ROI.", camera_id)
+        roi = {"zones": {}, "lines": {}}
+        self._roi_cache[camera_id] = roi
+        return roi
+
+    def _infer_role_from_roi(self, zones: dict, lines: dict) -> Optional[str]:
+        zone_names = set(zones.keys())
+        if {"area_atendimento_fila", "ponto_pagamento", "zona_funcionario_caixa"} & zone_names:
+            return "balcao"
+        if "area_consumo" in zone_names:
+            return "salao"
+        if lines:
+            return "entrada"
+        return None
+
     def _build_payload(self, cam: dict, state: dict, last_metrics: dict, bucket_start: int, bucket_end: int) -> dict:
         agg = state["agg"]
         frames = max(agg["frames"], 1)
@@ -565,6 +790,63 @@ class VisionWorker:
             },
         }
         return payload
+
+    def _log_bucket_summary(self, payload: dict, state: dict) -> None:
+        agg = state.get("agg") or {}
+        bucket = payload.get("bucket") or {}
+        bucket_start = bucket.get("start")
+        bucket_end = bucket.get("end")
+        bucket_seconds = bucket.get("seconds")
+        camera_id = payload.get("camera_id")
+        frames = agg.get("frames", 0)
+        fila_max = agg.get("fila_max", 0)
+        consumo_max = agg.get("consumo_max", 0)
+        staff_active_est = agg.get("staff_active_est", 0)
+        queue_avg_seconds = (payload.get("conversion") or {}).get("queue_avg_seconds", 0)
+        frames_processed_for_detection = agg.get("frames_processed_for_detection", 0)
+        stride = max(1, int(self.cfg.frame_stride))
+        frames_with_detections = agg.get("frames_with_detections", 0)
+        detections_sum = agg.get("detections_sum", 0)
+        avg_detections = (detections_sum / frames) if frames else 0.0
+        line_crossings = agg.get("line_crossings_count")
+        line_crossings_str = "NA" if line_crossings is None else str(line_crossings)
+        lines_defined_count = int(state.get("roi_lines_count") or 0)
+        message = (
+            f"[VISION] bucket camera_id={camera_id} start={bucket_start} end={bucket_end} "
+            f"seconds={bucket_seconds} frames={frames} fila_max={fila_max} "
+            f"consumo_max={consumo_max} staff_active_est={staff_active_est} "
+            f"queue_avg_seconds={queue_avg_seconds} frames_with_detections={frames_with_detections} "
+            f"avg_detections_per_frame={avg_detections:.2f} "
+            f"frames_processed_for_detection={frames_processed_for_detection} stride={stride} "
+            f"lines_defined_count={lines_defined_count} line_crossings_count={line_crossings_str}"
+        )
+        print(message)
+        self.logger.info(message)
+
+    def _log_startup_info(self) -> None:
+        zones_count = 0
+        lines_count = 0
+        roi_path = self.cfg.roi_path or ""
+        if self._roi_override:
+            zones_count = len(self._roi_override.get("zones") or {})
+            lines_count = len(self._roi_override.get("lines") or {})
+        elif self.cfg.source == "video":
+            camera_id = self._get_video_camera_id()
+            roi = self._load_roi_for_camera(camera_id)
+            zones_count = len(roi.get("zones") or {})
+            lines_count = len(roi.get("lines") or {})
+            roi_path = self._roi_path_by_camera.get(camera_id, roi_path)
+        elif not roi_path:
+            roi_path = str(self._programdata_roi_path("<camera_id>"))
+        model_path = _env_str("VISION_MODEL_PATH", "").strip() or "yolov8n.pt"
+        self.logger.info(
+            "[VISION] startup source=%s roi_path=%s zones_count=%s lines_count=%s model_path=%s",
+            self.cfg.source,
+            roi_path,
+            zones_count,
+            lines_count,
+            model_path,
+        )
 
     def _send_event(self, payload: dict):
         event_name = "vision.metrics.v1"
