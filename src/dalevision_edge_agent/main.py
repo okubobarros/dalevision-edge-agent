@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import json
 import logging
 from logging.handlers import RotatingFileHandler
 import os
@@ -160,6 +161,50 @@ def _parse_bool_env(name: str, default: bool) -> bool:
     raise ValueError(f"Invalid boolean for {name}: {raw}")
 
 
+def _parse_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"Invalid integer for {name}: {raw}") from exc
+
+
+def _parse_cameras_json(
+    raw: str,
+    logger: logging.Logger,
+) -> tuple[list[dict[str, Any]], str | None]:
+    if not raw or raw.strip() == "":
+        return [], None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return [], f"CAMERAS_JSON invalid JSON: {exc}"
+    if not isinstance(payload, list):
+        return [], "CAMERAS_JSON must be a JSON array"
+
+    cameras: list[dict[str, Any]] = []
+    for idx, item in enumerate(payload):
+        if not isinstance(item, dict):
+            return [], f"CAMERAS_JSON item {idx} must be an object"
+        camera_id = str(item.get("id") or item.get("camera_id") or "").strip()
+        rtsp_url = str(item.get("rtsp_url") or "").strip()
+        if not camera_id or not rtsp_url:
+            return [], f"CAMERAS_JSON item {idx} missing id/rtsp_url"
+        cameras.append(
+            {
+                "id": camera_id,
+                "name": str(item.get("name") or "").strip(),
+                "rtsp_url": rtsp_url,
+            }
+        )
+
+    if not cameras:
+        logger.warning("CAMERAS_JSON parsed but contained no valid cameras")
+    return cameras, None
+
+
 def _auto_set_vision_model_path(logger: logging.Logger) -> None:
     if os.getenv("VISION_MODEL_PATH"):
         return
@@ -231,6 +276,55 @@ def _is_camera_active(camera: dict[str, Any]) -> bool:
         if key in camera:
             return bool(camera.get(key))
     return True
+
+
+def _camera_health_loop(
+    *,
+    cloud_base_url: str,
+    edge_token: str,
+    cameras: list[dict[str, Any]],
+    interval_seconds: int,
+    perform_describe: bool,
+    logger: logging.Logger,
+) -> None:
+    while True:
+        for camera in cameras:
+            camera_id = str(camera.get("id") or "").strip()
+            rtsp_url = str(camera.get("rtsp_url") or "").strip()
+            if not camera_id or not rtsp_url:
+                continue
+            try:
+                health = check_camera_health(
+                    {"id": camera_id, "rtsp_url": rtsp_url},
+                    timeout_seconds=3,
+                    perform_describe=perform_describe,
+                    rtsp_url_override=rtsp_url,
+                )
+                health["camera_id"] = camera_id
+                ok_evt, status_evt, err_evt = send_camera_health_event(
+                    cloud_base_url=cloud_base_url,
+                    edge_token=edge_token,
+                    camera_health=health,
+                    timeout_seconds=10,
+                    logger=logger,
+                )
+                if ok_evt:
+                    logger.info(
+                        "camera_id=%s health sent status=%s latency_ms=%s",
+                        camera_id,
+                        health.get("status"),
+                        health.get("latency_ms"),
+                    )
+                else:
+                    logger.warning(
+                        "camera_id=%s health send failed status=%s error=%s",
+                        camera_id,
+                        status_evt,
+                        err_evt,
+                    )
+            except Exception as exc:
+                logger.exception("camera_id=%s health loop error: %s", camera_id, exc)
+        time.sleep(interval_seconds)
 
 
 def main() -> int:
@@ -380,6 +474,17 @@ def main() -> int:
         camera_sync_fatal,
         vision_source,
     )
+    cameras_json_raw = os.getenv("CAMERAS_JSON") or ""
+    cameras_json_list, cameras_json_error = _parse_cameras_json(cameras_json_raw, logger)
+    if cameras_json_error:
+        logger.error("[CAMERA_HEALTH] %s", cameras_json_error)
+        cameras_json_list = []
+
+    camera_health_interval_seconds = _parse_int_env(
+        "CAMERA_HEALTH_INTERVAL_SECONDS",
+        settings.camera_heartbeat_interval_seconds or 30,
+    )
+    camera_health_loop_started = False
 
     # --- Vision worker (optional) ---
     vision = None
@@ -440,6 +545,26 @@ def main() -> int:
         settings.camera_heartbeat_interval_seconds,
     )
 
+    if not camera_sync_enabled and cameras_json_list:
+        logger.info(
+            "[CAMERA_HEALTH] using CAMERAS_JSON source (sync disabled) cameras=%s",
+            len(cameras_json_list),
+        )
+        t = threading.Thread(
+            target=_camera_health_loop,
+            kwargs={
+                "cloud_base_url": settings.cloud_base_url,
+                "edge_token": settings.edge_token,
+                "cameras": cameras_json_list,
+                "interval_seconds": camera_health_interval_seconds,
+                "perform_describe": settings.rtsp_describe_enabled,
+                "logger": logger,
+            },
+            daemon=True,
+        )
+        t.start()
+        camera_health_loop_started = True
+
     while True:
         now = time.time()
         if camera_sync_enabled and now - last_camera_sync_at >= camera_sync_interval:
@@ -452,6 +577,25 @@ def main() -> int:
             )
             if cameras_error:
                 logger.warning("Camera sync skipped: %s", cameras_error)
+                if cameras_json_list and not camera_health_loop_started:
+                    logger.warning(
+                        "[CAMERA_HEALTH] camera sync failed; starting CAMERAS_JSON fallback cameras=%s",
+                        len(cameras_json_list),
+                    )
+                    t = threading.Thread(
+                        target=_camera_health_loop,
+                        kwargs={
+                            "cloud_base_url": settings.cloud_base_url,
+                            "edge_token": settings.edge_token,
+                            "cameras": cameras_json_list,
+                            "interval_seconds": camera_health_interval_seconds,
+                            "perform_describe": settings.rtsp_describe_enabled,
+                            "logger": logger,
+                        },
+                        daemon=True,
+                    )
+                    t.start()
+                    camera_health_loop_started = True
                 if camera_auth_tracker.consecutive >= MAX_CONSECUTIVE_AUTH_FAILURES:
                     message = (
                         f"ERRO FATAL: {MAX_CONSECUTIVE_AUTH_FAILURES} falhas de autenticacao "
