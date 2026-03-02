@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from ..cameras import build_auth_headers
 from .geometry import line_side, point_in_polygon
 from .roi_yaml import load_roi_yaml
 from .sources.video import VideoFrameSource
@@ -285,13 +286,15 @@ class VisionWorker:
         if self.cfg.source == "video":
             return []
         url = f"{self.cloud_base_url}/api/v1/stores/{self.store_id}/cameras/"
-        headers = {"X-EDGE-TOKEN": self.edge_token}
+        headers = build_auth_headers(self.edge_token)
         try:
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code >= 300:
-                if resp.status_code == 403:
+                if resp.status_code in (401, 403):
                     self.logger.warning(
-                        "[VISION] cameras list 403: verifique STORE_ID e EDGE_TOKEN (ou gere novo token no wizard)."
+                        "[VISION] cameras list auth failed status=%s url=%s hint=token invalido ou sem permissao",
+                        resp.status_code,
+                        url,
                     )
                 self.logger.warning("[VISION] cameras list failed %s %s", resp.status_code, resp.text[:200])
                 return []
@@ -611,7 +614,7 @@ class VisionWorker:
             "data": payload,
         }
         url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = {"X-EDGE-TOKEN": self.edge_token}
+        headers = build_auth_headers(self.edge_token)
         try:
             resp = requests.post(url, json=envelope, headers=headers, timeout=10)
             self.logger.info("[VISION] alert sent status=%s type=%s", resp.status_code, payload.get("event_type"))
@@ -863,7 +866,7 @@ class VisionWorker:
             "data": payload,
         }
         url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = {"X-EDGE-TOKEN": self.edge_token}
+        headers = build_auth_headers(self.edge_token)
         try:
             resp = requests.post(url, json=envelope, headers=headers, timeout=10)
             self.logger.info("[VISION] event sent status=%s receipt=%s", resp.status_code, receipt_id[:10])

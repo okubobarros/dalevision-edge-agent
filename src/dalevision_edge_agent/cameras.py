@@ -54,8 +54,12 @@ def _normalize_base_url(base_url: str) -> str:
     return (base_url or "").rstrip("/")
 
 
-def _headers(edge_token: str) -> dict[str, str]:
-    return {"X-EDGE-TOKEN": edge_token}
+def build_auth_headers(edge_token: str) -> dict[str, str]:
+    token = edge_token or ""
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-EDGE-TOKEN": token,
+    }
 
 
 def _format_auth_header_debug(headers: dict[str, str]) -> str:
@@ -183,7 +187,7 @@ def fetch_cameras(
 ) -> tuple[list[dict[str, Any]], Optional[str]]:
     logger = logger or logging.getLogger("dalevision-edge-agent")
     base_url = _normalize_base_url(cloud_base_url)
-    headers = _headers(edge_token)
+    headers = build_auth_headers(edge_token)
     auth_debug = _format_auth_header_debug(headers)
 
     for endpoint in CAMERA_LIST_ENDPOINTS:
@@ -207,6 +211,12 @@ def fetch_cameras(
                 error,
                 auth_debug,
             )
+            if status in AUTH_FAILURE_STATUSES:
+                logger.warning(
+                    "Camera list auth failed url=%s status=%s hint=token invalido ou sem permissao",
+                    url,
+                    status,
+                )
             continue
 
         cameras = payload.get("results") or payload.get("data") or payload
@@ -286,7 +296,7 @@ def fetch_roi(
         return cached, cached_version, True, None
 
     base_url = _normalize_base_url(cloud_base_url)
-    headers = _headers(edge_token)
+    headers = build_auth_headers(edge_token)
     for endpoint in ROI_ENDPOINTS:
         url = f"{base_url}{endpoint.format(camera_id=camera_id)}"
         payload, status, error = _request_json_with_backoff(
@@ -305,6 +315,12 @@ def fetch_roi(
                 status,
                 error,
             )
+            if status in AUTH_FAILURE_STATUSES:
+                logger.warning(
+                    "ROI auth failed url=%s status=%s hint=token invalido ou sem permissao",
+                    url,
+                    status,
+                )
             continue
 
         version = _extract_roi_version(payload)
@@ -447,7 +463,7 @@ def send_camera_health_event(
     response, status, error = _request_json_with_backoff(
         method="POST",
         url=url,
-        headers=_headers(edge_token),
+        headers=build_auth_headers(edge_token),
         json_body=payload,
         timeout_seconds=timeout_seconds,
         logger=logger,
@@ -463,6 +479,12 @@ def send_camera_health_event(
         status,
         detail,
     )
+    if status in AUTH_FAILURE_STATUSES:
+        logger.warning(
+            "Health event auth failed url=%s status=%s hint=token invalido ou sem permissao",
+            url,
+            status,
+        )
     return False, status, detail
 
 

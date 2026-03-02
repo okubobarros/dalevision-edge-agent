@@ -12,6 +12,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from dalevision_edge_agent.cameras import (  # noqa: E402
+    build_auth_headers,
     build_camera_heartbeat_fields,
     capture_snapshot_if_possible,
     fetch_cameras,
@@ -41,6 +42,9 @@ class CamerasTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual(2, len(cameras))
         self.assertEqual("cam-1", cameras[0]["id"])
+        headers = mock_request.call_args.kwargs.get("headers")
+        self.assertEqual("Bearer token", headers.get("Authorization"))
+        self.assertEqual("token", headers.get("X-EDGE-TOKEN"))
 
     @patch("dalevision_edge_agent.cameras.requests.request")
     def test_fetch_roi_skips_download_when_cached_version_matches(
@@ -85,6 +89,11 @@ class CamerasTests(unittest.TestCase):
         self.assertEqual(1, fields["cameras_offline"])
         self.assertEqual(1, fields["cameras_unknown"])
         self.assertEqual(4, len(fields["cameras"]))
+
+    def test_build_auth_headers(self) -> None:
+        headers = build_auth_headers("edge-token-123")
+        self.assertEqual("Bearer edge-token-123", headers.get("Authorization"))
+        self.assertEqual("edge-token-123", headers.get("X-EDGE-TOKEN"))
 
     @patch("dalevision_edge_agent.cameras._try_import_cv2")
     @patch("dalevision_edge_agent.cameras._ffmpeg_path")

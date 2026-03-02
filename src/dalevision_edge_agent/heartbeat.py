@@ -5,6 +5,8 @@ from typing import Any, Optional, Tuple
 
 import requests
 
+from .cameras import build_auth_headers
+
 REQUEST_TIMEOUT_SECONDS = 10
 
 
@@ -36,7 +38,7 @@ def send_heartbeat(
         "source": "edge",
         "data": data,
     }
-    headers = {"X-EDGE-TOKEN": edge_token}
+    headers = build_auth_headers(edge_token)
 
     try:
         response = requests.post(
