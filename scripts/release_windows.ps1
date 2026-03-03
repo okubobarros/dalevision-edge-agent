@@ -68,10 +68,15 @@ $internalDir = Join-Path $scriptsDir "internal"
 New-Item -ItemType Directory -Path $internalDir -Force | Out-Null
 Copy-Item (Join-Path $repoRoot "scripts\install-service.ps1") (Join-Path $scriptsDir "install-service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\uninstall-service.ps1") (Join-Path $scriptsDir "uninstall-service.ps1") -Force
+Copy-Item (Join-Path $repoRoot "scripts\install-service.ps1") (Join-Path $scriptsDir "install_service.ps1") -Force
+Copy-Item (Join-Path $repoRoot "scripts\uninstall-service.ps1") (Join-Path $scriptsDir "uninstall_service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\verify-service.ps1") (Join-Path $scriptsDir "verify-service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\update.ps1") (Join-Path $scriptsDir "update.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1") (Join-Path $internalDir "Start_DaleVision_Agent.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat") (Join-Path $internalDir "Start_DaleVision_Agent.bat") -Force
+if (Test-Path (Join-Path $repoRoot "scripts\nssm.exe")) {
+  Copy-Item (Join-Path $repoRoot "scripts\nssm.exe") (Join-Path $scriptsDir "nssm.exe") -Force
+}
 
 # 4.1) BUILD_INFO.txt
 $buildTimestamp = Get-Date -Format o
@@ -125,11 +130,17 @@ $required = @(
   "README.txt",
   "scripts/install-service.ps1",
   "scripts/uninstall-service.ps1",
+  "scripts/install_service.ps1",
+  "scripts/uninstall_service.ps1",
   "scripts/verify-service.ps1",
   "scripts/update.ps1",
   "scripts/internal/Start_DaleVision_Agent.ps1",
   "scripts/internal/Start_DaleVision_Agent.bat"
 )
+$nssmReleasePath = Join-Path $releaseWin "scripts/nssm.exe"
+if (Test-Path $nssmReleasePath) {
+  $required += "scripts/nssm.exe"
+}
 $missing = $required | Where-Object { -not (Test-Path (Join-Path $releaseWin $_)) }
 if ($missing.Count -gt 0) {
   throw "Missing required files in release\win: $($missing -join ', ')"

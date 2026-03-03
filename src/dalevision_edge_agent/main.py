@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import importlib.metadata
 import json
 import logging
@@ -44,6 +45,138 @@ MAX_CONSECUTIVE_FAILURES = 10
 EXIT_CONFIG_ERROR = 2
 EXIT_AUTH_ERROR = 3
 EXIT_NETWORK_ERROR = 4
+
+
+def _candidate_install_roots() -> list[Path]:
+    roots: list[Path] = []
+    cwd = Path.cwd()
+    roots.append(cwd)
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        if exe_dir not in roots:
+            roots.append(exe_dir)
+    except Exception:
+        pass
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        mp = Path(str(meipass))
+        if mp not in roots:
+            roots.append(mp)
+    return roots
+
+
+def _resolve_install_service_script() -> tuple[Path | None, list[Path], Path]:
+    checked: list[Path] = []
+    for root in _candidate_install_roots():
+        for rel in (
+            "install-service.ps1",
+            "install_service.ps1",
+            "scripts/install-service.ps1",
+            "scripts/install_service.ps1",
+        ):
+            candidate = root / rel
+            checked.append(candidate)
+            if candidate.exists():
+                install_root = candidate.parent.parent if candidate.parent.name.lower() == "scripts" else root
+                return candidate, checked, install_root
+    return None, checked, Path.cwd()
+
+
+def _resolve_run_agent_cmd() -> tuple[Path | None, list[Path]]:
+    checked: list[Path] = []
+    for root in _candidate_install_roots():
+        candidate = root / "run_agent.cmd"
+        checked.append(candidate)
+        if candidate.exists():
+            return candidate, checked
+    return None, checked
+
+
+def _is_windows_admin() -> bool:
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _create_startup_shortcut(*, logger: logging.Logger) -> tuple[bool, str]:
+    run_cmd, checked = _resolve_run_agent_cmd()
+    if run_cmd is None:
+        searched = ", ".join(str(p) for p in checked)
+        return False, f"Fallback autostart indisponivel: run_agent.cmd nao encontrado. Procurado em: {searched}"
+
+    appdata = os.getenv("APPDATA") or ""
+    if not appdata:
+        return False, "Fallback autostart indisponivel: APPDATA nao definido."
+    startup_dir = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    startup_dir.mkdir(parents=True, exist_ok=True)
+    link_path = startup_dir / "DaleVision Edge Agent.lnk"
+
+    target = str(run_cmd.resolve())
+    workdir = str(run_cmd.resolve().parent)
+    icon = str((run_cmd.resolve().parent / "dalevision-edge-agent.exe"))
+
+    def _ps_quote(value: str) -> str:
+        return value.replace("'", "''")
+
+    script = (
+        f"$ws=New-Object -ComObject WScript.Shell;"
+        f"$sc=$ws.CreateShortcut('{_ps_quote(str(link_path))}');"
+        f"$sc.TargetPath='{_ps_quote(target)}';"
+        f"$sc.WorkingDirectory='{_ps_quote(workdir)}';"
+        f"$sc.IconLocation='{_ps_quote(icon)},0';"
+        "$sc.Save();"
+    )
+
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "erro desconhecido").strip()
+        logger.warning("Startup shortcut create failed: %s", detail)
+        return False, f"Fallback autostart falhou: {detail}"
+    if not link_path.exists():
+        return False, f"Fallback autostart falhou: atalho nao encontrado em {link_path}"
+    logger.info("Startup shortcut ready at %s", link_path)
+    return True, f"Fallback autostart configurado em: {link_path}"
+
+
+def _run_install_service_command(*, logger: logging.Logger) -> int:
+    script_path, checked, install_root = _resolve_install_service_script()
+    checked_text = ", ".join(str(p) for p in checked)
+    if script_path is None:
+        print("Nao foi possivel localizar o instalador de servico.")
+        print("Verifique se a pasta scripts foi extraida junto do agente.")
+        print(f"Caminhos verificados: {checked_text}")
+        logger.warning("install-service script missing; checked=%s", checked_text)
+        if not _is_windows_admin():
+            ok, msg = _create_startup_shortcut(logger=logger)
+            print(msg)
+            return 0 if ok else 1
+        return 1
+
+    if not _is_windows_admin():
+        print("Permissao de administrador nao detectada.")
+        print("Aplicando fallback de autostart no Startup do usuario atual...")
+        ok, msg = _create_startup_shortcut(logger=logger)
+        print(msg)
+        return 0 if ok else 1
+
+    result = subprocess.run(
+        ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script_path), "-InstallDir", str(install_root)],
+        capture_output=True,
+        text=True,
+    )
+    if result.stdout.strip():
+        print(result.stdout.strip())
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "falha ao instalar servico."
+        print(detail)
+        logger.error("install-service command failed rc=%s detail=%s", result.returncode, detail)
+        return result.returncode or 1
+    return 0
 
 
 def _rollback_update_if_needed(updated_from: str, logger: logging.Logger) -> None:
@@ -333,29 +466,32 @@ def main() -> int:
     logger = _setup_logging()
 
     if len(sys.argv) == 1:
-        print("DALE Vision Edge Agent")
-        print("1) Conectar (Teste rapido)")
-        print("2) Iniciar monitoramento (rodar sempre)")
-        print("3) Instalar como servico (requer admin)")
-        print("4) Abrir dashboard")
-        choice = input("Escolha uma opcao (1-4): ").strip()
-        if choice == "1":
-            args.command = "run"
-            args.once = True
-        elif choice == "2":
-            args.command = "run"
-        elif choice == "3":
-            args.command = "install-service"
-        elif choice == "4":
-            try:
-                url = os.getenv("DASHBOARD_URL") or "https://app.dalevision.com/app/cameras?onboarding=true"
-                os.startfile(url)
-            except Exception:
-                print("Nao foi possivel abrir o navegador.")
-            return 0
-        else:
+        while True:
+            print("DALE Vision Edge Agent")
+            print("1) Conectar (Teste rapido)")
+            print("2) Iniciar monitoramento (rodar sempre)")
+            print("3) Instalar como servico (requer admin)")
+            print("4) Abrir dashboard")
+            choice = input("Escolha uma opcao (1-4): ").strip()
+            if choice == "1":
+                args.command = "run"
+                args.once = True
+                break
+            if choice == "2":
+                args.command = "run"
+                break
+            if choice == "3":
+                _run_install_service_command(logger=logger)
+                print("")
+                continue
+            if choice == "4":
+                try:
+                    url = os.getenv("DASHBOARD_URL") or "https://app.dalevision.com/app/cameras?onboarding=true"
+                    os.startfile(url)
+                except Exception:
+                    print("Nao foi possivel abrir o navegador.")
+                return 0
             print("Opcao invalida.")
-            return 1
 
     if args.command in {"diagnostics", "doctor"}:
         cloud_base_url = os.getenv("CLOUD_BASE_URL") or os.getenv("DALE_CLOUD_BASE_URL") or ""
@@ -368,20 +504,7 @@ def main() -> int:
         return 0
 
     if args.command == "install-service":
-        script_path = Path.cwd() / "install-service.ps1"
-        if not script_path.exists():
-            print("Arquivo install-service.ps1 nao encontrado.")
-            return 1
-        result = subprocess.run(
-            ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script_path)],
-            capture_output=True,
-            text=True,
-        )
-        print(result.stdout.strip())
-        if result.returncode != 0:
-            print(result.stderr.strip())
-            return 1
-        return 0
+        return _run_install_service_command(logger=logger)
 
     if args.command == "scan":
         results = run_scan(logger=logger)

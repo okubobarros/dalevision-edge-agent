@@ -45,6 +45,12 @@ def _env_str(name: str, default: str) -> str:
     return os.getenv(name, default)
 
 
+EDGE_CAMERA_ENDPOINTS = (
+    "/api/edge/cameras/",
+    "/api/edge/stores/{store_id}/cameras/",
+)
+
+
 @dataclass
 class VisionConfig:
     enabled: bool = False
@@ -282,41 +288,183 @@ class VisionWorker:
             self._log_bucket_summary(payload, state)
             self._send_event(payload)
 
+    def _parse_bool_env(self, name: str, default: bool) -> bool:
+        raw = _env_str(name, "")
+        if not raw:
+            return default
+        value = raw.strip().lower()
+        if value in {"1", "true", "yes", "y", "on"}:
+            return True
+        if value in {"0", "false", "no", "n", "off"}:
+            return False
+        self.logger.warning("[VISION] invalid boolean env %s=%s using default=%s", name, raw, default)
+        return default
+
+    def _cameras_cache_path(self) -> Path:
+        raw = _env_str("VISION_CAMERAS_CACHE_PATH", "").strip()
+        if raw:
+            return Path(raw)
+        return Path.cwd() / "cache" / "cameras_cache.json"
+
+    def _parse_cameras_json(self, raw: str, *, source: str) -> tuple[list[dict], Optional[str]]:
+        if not raw.strip():
+            return [], None
+        try:
+            payload = json.loads(raw)
+        except Exception as exc:
+            return [], f"{source} invalid JSON: {exc}"
+        if not isinstance(payload, list):
+            return [], f"{source} must be a JSON array"
+        cameras: list[dict] = []
+        for idx, item in enumerate(payload):
+            normalized = self._normalize_camera(item)
+            if normalized is None:
+                self.logger.warning("[VISION] %s item=%s skipped (missing id/rtsp_url)", source, idx)
+                continue
+            cameras.append(normalized)
+        return cameras, None
+
+    def _normalize_camera(self, cam: Any) -> Optional[dict]:
+        if not isinstance(cam, dict):
+            return None
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "").strip()
+        rtsp_url = str(cam.get("rtsp_url") or "").strip()
+        if not camera_id or not rtsp_url:
+            return None
+        return {
+            **cam,
+            "id": camera_id,
+            "camera_id": camera_id,
+            "rtsp_url": rtsp_url,
+            "name": str(cam.get("name") or "").strip(),
+            "external_id": str(cam.get("external_id") or cam.get("name") or "").strip(),
+        }
+
+    def _apply_roi_to_cameras(self, cameras: List[dict]) -> List[dict]:
+        if self._roi_override:
+            if len(cameras) > 1:
+                self.logger.warning(
+                    "[VISION] ROI override active with %s cameras; applying to all",
+                    len(cameras),
+                )
+            for cam in cameras:
+                cam["roi_local"] = self._roi_override
+            return cameras
+
+        for cam in cameras:
+            camera_id = str(cam.get("camera_id") or cam.get("id") or "").strip()
+            if not camera_id:
+                continue
+            cam["roi_local"] = self._load_roi_for_camera(camera_id)
+        return cameras
+
+    def _save_cameras_cache(self, cameras: List[dict], *, source: str) -> None:
+        path = self._cameras_cache_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "source": source,
+                "updated_at": _iso(_now_ts()),
+                "cameras": cameras,
+            }
+            path.write_text(json.dumps(payload, ensure_ascii=True), encoding="utf-8")
+        except Exception as exc:
+            self.logger.warning("[VISION] cameras cache write failed path=%s error=%s", path, exc)
+
+    def _load_cameras_cache(self) -> tuple[list[dict], Optional[str]]:
+        path = self._cameras_cache_path()
+        if not path.exists():
+            return [], None
+        try:
+            raw = path.read_text(encoding="utf-8")
+            payload = _safe_json_load(raw)
+            if isinstance(payload, dict):
+                cached_source = str(payload.get("source") or "cache")
+                raw_cameras = payload.get("cameras")
+            else:
+                cached_source = "cache_legacy"
+                raw_cameras = payload
+            if not isinstance(raw_cameras, list):
+                return [], None
+            cameras = []
+            for item in raw_cameras:
+                normalized = self._normalize_camera(item)
+                if normalized is not None:
+                    cameras.append(normalized)
+            return cameras, cached_source
+        except Exception as exc:
+            self.logger.warning("[VISION] cameras cache read failed path=%s error=%s", path, exc)
+            return [], None
+
+    def _fetch_cameras_from_edge(self) -> tuple[list[dict], Optional[str]]:
+        headers = build_auth_headers(self.edge_token)
+        for endpoint in EDGE_CAMERA_ENDPOINTS:
+            path = endpoint.format(store_id=self.store_id)
+            url = f"{self.cloud_base_url}{path}"
+            params = {"store_id": self.store_id} if "{store_id}" not in endpoint else None
+            try:
+                resp = requests.get(url, headers=headers, params=params, timeout=10)
+                if resp.status_code >= 300:
+                    if resp.status_code in (401, 403):
+                        self.logger.warning(
+                            "[VISION] cameras edge auth failed status=%s url=%s",
+                            resp.status_code,
+                            url,
+                        )
+                    else:
+                        self.logger.warning("[VISION] cameras edge failed %s url=%s", resp.status_code, url)
+                    continue
+                payload = resp.json()
+                raw_cameras = payload.get("results") if isinstance(payload, dict) else payload
+                if isinstance(payload, dict) and raw_cameras is None:
+                    raw_cameras = payload.get("data")
+                if not isinstance(raw_cameras, list):
+                    self.logger.warning("[VISION] cameras edge invalid payload url=%s", url)
+                    continue
+                cameras = []
+                for item in raw_cameras:
+                    normalized = self._normalize_camera(item)
+                    if normalized is not None:
+                        cameras.append(normalized)
+                return cameras, f"edge:{path}"
+            except Exception as exc:
+                self.logger.warning("[VISION] cameras edge exception url=%s error=%s", url, exc)
+        return [], None
+
     def _fetch_cameras(self) -> List[dict]:
         if self.cfg.source == "video":
             return []
-        url = f"{self.cloud_base_url}/api/v1/stores/{self.store_id}/cameras/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code >= 300:
-                if resp.status_code in (401, 403):
-                    self.logger.warning(
-                        "[VISION] cameras list auth failed status=%s url=%s hint=token invalido ou sem permissao",
-                        resp.status_code,
-                        url,
-                    )
-                self.logger.warning("[VISION] cameras list failed %s %s", resp.status_code, resp.text[:200])
-                return []
-            cameras = resp.json() or []
-            if self._roi_override:
-                if len(cameras) > 1:
-                    self.logger.warning(
-                        "[VISION] ROI override active with %s cameras; applying to all",
-                        len(cameras),
-                    )
-                for cam in cameras:
-                    cam["roi_local"] = self._roi_override
-            else:
-                for cam in cameras:
-                    camera_id = str(cam.get("camera_id") or cam.get("id") or "").strip()
-                    if not camera_id:
-                        continue
-                    cam["roi_local"] = self._load_roi_for_camera(camera_id)
+
+        cameras_json_raw = _env_str("CAMERAS_JSON", "")
+        cameras_from_env, env_error = self._parse_cameras_json(cameras_json_raw, source="CAMERAS_JSON")
+        if env_error:
+            self.logger.warning("[VISION] %s", env_error)
+        if cameras_from_env:
+            cameras = self._apply_roi_to_cameras(cameras_from_env)
+            self._save_cameras_cache(cameras, source="CAMERAS_JSON")
+            self.logger.info("[VISION] cameras source=CAMERAS_JSON loaded=%s", len(cameras))
             return cameras
-        except Exception as exc:
-            self.logger.warning("[VISION] cameras list exception: %s", exc)
-            return []
+
+        camera_sync_enabled = self._parse_bool_env("CAMERA_SYNC_ENABLED", True)
+        if camera_sync_enabled:
+            edge_cameras, edge_source = self._fetch_cameras_from_edge()
+            if edge_cameras:
+                cameras = self._apply_roi_to_cameras(edge_cameras)
+                self._save_cameras_cache(cameras, source=edge_source or "edge")
+                self.logger.info("[VISION] cameras source=%s loaded=%s", edge_source or "edge", len(cameras))
+                return cameras
+            self.logger.warning("[VISION] cameras edge sync unavailable; trying cache")
+        else:
+            self.logger.info("[VISION] cameras sync disabled (CAMERA_SYNC_ENABLED=0); using cache/env only")
+
+        cached_cameras, cached_source = self._load_cameras_cache()
+        if cached_cameras:
+            cameras = self._apply_roi_to_cameras(cached_cameras)
+            self.logger.info("[VISION] cameras source=cache(%s) loaded=%s", cached_source or "cache", len(cameras))
+            return cameras
+
+        self.logger.warning("[VISION] cameras unavailable source=none loaded=0")
+        return []
 
     def _resolve_role(self, cam: dict) -> Optional[str]:
         if cam.get("role"):
@@ -350,20 +498,36 @@ class VisionWorker:
             return None
 
     def _fetch_rtsp_frame(self, cam: dict):
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
         rtsp_url = cam.get("rtsp_url")
         if not rtsp_url:
+            self.logger.info("[VISION] rtsp attempt camera_id=%s ok=0 elapsed_ms=0 reason=rtsp_url_missing", camera_id)
             return None
+        started = time.perf_counter()
         try:
             import cv2
             cap = cv2.VideoCapture(rtsp_url)
             if not cap.isOpened():
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                self.logger.info("[VISION] rtsp attempt camera_id=%s ok=0 elapsed_ms=%s reason=open_failed", camera_id, elapsed_ms)
                 return None
             ok, frame = cap.read()
             cap.release()
             if not ok:
+                elapsed_ms = int((time.perf_counter() - started) * 1000)
+                self.logger.info("[VISION] rtsp attempt camera_id=%s ok=0 elapsed_ms=%s reason=read_failed", camera_id, elapsed_ms)
                 return None
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            self.logger.info("[VISION] rtsp attempt camera_id=%s ok=1 elapsed_ms=%s", camera_id, elapsed_ms)
             return frame
-        except Exception:
+        except Exception as exc:
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            self.logger.info(
+                "[VISION] rtsp attempt camera_id=%s ok=0 elapsed_ms=%s reason=exception error=%s",
+                camera_id,
+                elapsed_ms,
+                exc,
+            )
             return None
 
     def _process_frame(self, state: dict, cam: dict, frame, ts: float) -> Optional[dict]:

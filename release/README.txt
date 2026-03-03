@@ -15,6 +15,7 @@ PASSO 3: INSTALAR AUTOSTART
 2) A tarefa roda como SYSTEM, em janela oculta.
 3) O instalador copia automaticamente para C:\ProgramData\DaleVision\EdgeAgent
 3) Se o Windows bloqueou o download, o instalador ja desbloqueia automaticamente.
+4) Pelo menu do agente (opcao 3), sem admin o sistema cria fallback no Startup do usuario.
 
 PASSO 4: VERIFICAR STATUS
 1) Execute 03_VERIFICAR_STATUS.bat.
@@ -56,3 +57,11 @@ DIAGNOSTICO
 SE O WINDOWS BLOQUEAR O ARQUIVO (DOWNLOAD)
 1) Clique com o botao direito no .zip ou .exe
 2) Propriedades > Desbloquear > Aplicar
+
+TESTE MANUAL (INSTALL-SERVICE + FALLBACK)
+1) Extraia o ZIP em uma pasta local.
+2) Rode `dalevision-edge-agent.exe` e escolha opcao 3.
+3) Com Admin: validar criacao das tarefas `DaleVisionEdgeAgent` e `DaleVisionEdgeAgentUpdate`.
+4) Sem Admin: validar mensagem de fallback e arquivo `DaleVision Edge Agent.lnk` em:
+   `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
+5) Validar que o app nao fecha apos erro de script ausente; o menu deve continuar ativo.
