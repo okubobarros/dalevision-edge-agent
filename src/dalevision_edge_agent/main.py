@@ -13,7 +13,7 @@ import sys
 import time
 import threading
 import traceback
-from typing import Any
+from typing import Any, Optional
 
 from .cameras import (
     AuthFailureTracker,
@@ -143,6 +143,37 @@ def _create_startup_shortcut(*, logger: logging.Logger) -> tuple[bool, str]:
     return True, f"Fallback autostart configurado em: {link_path}"
 
 
+def _create_logon_scheduled_task(*, logger: logging.Logger) -> tuple[bool, str]:
+    run_cmd, checked = _resolve_run_agent_cmd()
+    if run_cmd is None:
+        searched = ", ".join(str(p) for p in checked)
+        return False, f"Fallback schtasks indisponivel: run_agent.cmd nao encontrado. Procurado em: {searched}"
+
+    install_dir = run_cmd.parent
+    task_name = "DaleVisionEdgeAgentUser"
+    run_cmd_escaped = str(run_cmd).replace('"', '""')
+    install_dir_escaped = str(install_dir).replace('"', '""')
+    task_cmd = f'cmd.exe /c "cd /d ""{install_dir_escaped}"" && ""{run_cmd_escaped}"""'
+    create_cmd = [
+        "schtasks",
+        "/Create",
+        "/SC",
+        "ONLOGON",
+        "/TN",
+        task_name,
+        "/TR",
+        task_cmd,
+        "/F",
+    ]
+    result = subprocess.run(create_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "erro desconhecido").strip()
+        logger.warning("Scheduled task fallback failed: %s", detail)
+        return False, f"Fallback schtasks falhou: {detail}"
+    logger.info("Scheduled task fallback ready task=%s install_dir=%s", task_name, install_dir)
+    return True, f"Fallback schtasks configurado: {task_name} (logon do usuario atual)"
+
+
 def _run_install_service_command(*, logger: logging.Logger) -> int:
     script_path, checked, install_root = _resolve_install_service_script()
     checked_text = ", ".join(str(p) for p in checked)
@@ -151,6 +182,17 @@ def _run_install_service_command(*, logger: logging.Logger) -> int:
         print("Verifique se a pasta scripts foi extraida junto do agente.")
         print(f"Caminhos verificados: {checked_text}")
         logger.warning("install-service script missing; checked=%s", checked_text)
+        answer = "s"
+        if sys.stdin is not None and sys.stdin.isatty():
+            answer = input("Deseja criar fallback de autostart via Scheduled Task no logon? (s/N): ").strip().lower()
+        if answer in {"s", "sim", "y", "yes"}:
+            ok, msg = _create_logon_scheduled_task(logger=logger)
+            print(msg)
+            if ok:
+                return 0
+            ok_startup, msg_startup = _create_startup_shortcut(logger=logger)
+            print(msg_startup)
+            return 0 if ok_startup else 1
         if not _is_windows_admin():
             ok, msg = _create_startup_shortcut(logger=logger)
             print(msg)
@@ -244,6 +286,12 @@ def _parse_args() -> argparse.Namespace:
         dest="updated_from",
         default=None,
         help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--smoke",
+        type=int,
+        default=0,
+        help="Run smoke test for N seconds (heartbeat + camera_health from CAMERAS_JSON) and exit",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -411,53 +459,153 @@ def _is_camera_active(camera: dict[str, Any]) -> bool:
     return True
 
 
+def _normalize_local_health(raw_health: dict[str, Any]) -> dict[str, Any]:
+    error_raw = str(raw_health.get("error") or "").strip().lower()
+    status_raw = str(raw_health.get("status") or "").strip().lower()
+    latency_ms = raw_health.get("latency_ms")
+
+    status = "online" if status_raw in {"online", "degraded"} and not error_raw else "error"
+    if status == "online":
+        error = None
+    elif "unauthorized" in error_raw or "auth" in error_raw or "401" in error_raw or "403" in error_raw:
+        error = "auth_failed"
+    elif error_raw in {"timeout", "timed out"} or "timeout" in error_raw:
+        error = "rtsp_timeout"
+    else:
+        error = "connect_failed"
+
+    return {
+        "camera_id": raw_health.get("camera_id"),
+        "status": status,
+        "latency_ms": latency_ms if isinstance(latency_ms, int) else None,
+        "error": error,
+        "checked_at": raw_health.get("checked_at"),
+    }
+
+
+def _run_camera_health_once(
+    *,
+    cloud_base_url: str,
+    edge_token: str,
+    store_id: str,
+    agent_id: str,
+    cameras: list[dict[str, Any]],
+    logger: logging.Logger,
+    state_store: Optional[dict[str, dict[str, Any]]] = None,
+) -> int:
+    posted = 0
+    for camera in cameras:
+        camera_id = str(camera.get("id") or camera.get("camera_id") or "").strip()
+        rtsp_url = str(camera.get("rtsp_url") or "").strip()
+        if not camera_id or not rtsp_url:
+            logger.warning("[CAMERA_HEALTH] skipping invalid camera camera_id=%s", camera_id or "missing")
+            continue
+        raw_health = check_camera_health(
+            {"id": camera_id, "rtsp_url": rtsp_url},
+            timeout_seconds=6,
+            perform_describe=True,
+            rtsp_url_override=rtsp_url,
+        )
+        raw_health["camera_id"] = camera_id
+        health = _normalize_local_health(raw_health)
+        logger.info(
+            "[CAMERA_HEALTH] camera_id=%s status=%s latency_ms=%s error=%s",
+            camera_id,
+            health.get("status"),
+            health.get("latency_ms"),
+            health.get("error"),
+        )
+        ok_evt, status_evt, err_evt = send_camera_health_event(
+            cloud_base_url=cloud_base_url,
+            edge_token=edge_token,
+            store_id=store_id,
+            agent_id=agent_id,
+            camera_health=health,
+            timeout_seconds=10,
+            logger=logger,
+        )
+        logger.info(
+            "[CAMERA_HEALTH] POST camera_id=%s status_code=%s ok=%s error=%s",
+            camera_id,
+            status_evt,
+            ok_evt,
+            err_evt,
+        )
+        if ok_evt:
+            posted += 1
+        if state_store is not None:
+            state_store[camera_id] = {
+                "status": "online" if health.get("status") == "online" else "offline",
+                "roi_version": "local",
+                "error": health.get("error"),
+                "latency_ms": health.get("latency_ms"),
+            }
+    return posted
+
+
 def _camera_health_loop(
     *,
     cloud_base_url: str,
     edge_token: str,
+    store_id: str,
+    agent_id: str,
     cameras: list[dict[str, Any]],
     interval_seconds: int,
-    perform_describe: bool,
     logger: logging.Logger,
+    state_store: Optional[dict[str, dict[str, Any]]] = None,
 ) -> None:
     while True:
-        for camera in cameras:
-            camera_id = str(camera.get("id") or "").strip()
-            rtsp_url = str(camera.get("rtsp_url") or "").strip()
-            if not camera_id or not rtsp_url:
-                continue
-            try:
-                health = check_camera_health(
-                    {"id": camera_id, "rtsp_url": rtsp_url},
-                    timeout_seconds=3,
-                    perform_describe=perform_describe,
-                    rtsp_url_override=rtsp_url,
-                )
-                health["camera_id"] = camera_id
-                ok_evt, status_evt, err_evt = send_camera_health_event(
-                    cloud_base_url=cloud_base_url,
-                    edge_token=edge_token,
-                    camera_health=health,
-                    timeout_seconds=10,
-                    logger=logger,
-                )
-                if ok_evt:
-                    logger.info(
-                        "camera_id=%s health sent status=%s latency_ms=%s",
-                        camera_id,
-                        health.get("status"),
-                        health.get("latency_ms"),
-                    )
-                else:
-                    logger.warning(
-                        "camera_id=%s health send failed status=%s error=%s",
-                        camera_id,
-                        status_evt,
-                        err_evt,
-                    )
-            except Exception as exc:
-                logger.exception("camera_id=%s health loop error: %s", camera_id, exc)
+        try:
+            _run_camera_health_once(
+                cloud_base_url=cloud_base_url,
+                edge_token=edge_token,
+                store_id=store_id,
+                agent_id=agent_id,
+                cameras=cameras,
+                logger=logger,
+                state_store=state_store,
+            )
+        except Exception as exc:
+            logger.exception("[CAMERA_HEALTH] loop error: %s", exc)
         time.sleep(interval_seconds)
+
+
+def _run_smoke(
+    *,
+    seconds: int,
+    settings,
+    url: str,
+    version: str,
+    cameras: list[dict[str, Any]],
+    logger: logging.Logger,
+) -> int:
+    logger.info("[SMOKE] starting duration_seconds=%s cameras=%s", seconds, len(cameras))
+    hb_ok, hb_status, hb_error = send_heartbeat(
+        url=url,
+        edge_token=settings.edge_token,
+        store_id=settings.store_id,
+        agent_id=settings.agent_id,
+        version=version,
+        timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+    )
+    print(f"SMOKE heartbeat status={hb_status} ok={hb_ok} error={hb_error}")
+    if not cameras:
+        print("SMOKE erro: CAMERAS_JSON vazio ou invalido.")
+        return 1
+
+    posted = _run_camera_health_once(
+        cloud_base_url=settings.cloud_base_url,
+        edge_token=settings.edge_token,
+        store_id=settings.store_id,
+        agent_id=settings.agent_id,
+        cameras=cameras,
+        logger=logger,
+    )
+    print(f"OK: posted {posted} camera_health events")
+    if seconds > 1:
+        sleep_for = min(seconds, 5)
+        time.sleep(sleep_for)
+    return 0 if posted > 0 else 1
 
 
 def main() -> int:
@@ -602,12 +750,34 @@ def main() -> int:
     if cameras_json_error:
         logger.error("[CAMERA_HEALTH] %s", cameras_json_error)
         cameras_json_list = []
+    local_cameras_mode = len(cameras_json_list) >= 1
+    if local_cameras_mode and camera_sync_enabled:
+        logger.info("[CAMERA_HEALTH] local cameras mode active; disabling remote camera sync")
+        camera_sync_enabled = False
+    if local_cameras_mode:
+        os.environ.setdefault("VISION_LOCAL_CAMERAS_ONLY", "1")
+    logger.info(
+        "[CAMERA_HEALTH] local_mode=%s cameras_json=%s camera_sync_enabled=%s",
+        local_cameras_mode,
+        len(cameras_json_list),
+        camera_sync_enabled,
+    )
 
     camera_health_interval_seconds = _parse_int_env(
         "CAMERA_HEALTH_INTERVAL_SECONDS",
         settings.camera_heartbeat_interval_seconds or 30,
     )
     camera_health_loop_started = False
+    camera_states: dict[str, dict[str, Any]] = {}
+    if args.smoke and args.smoke > 0:
+        return _run_smoke(
+            seconds=args.smoke,
+            settings=settings,
+            url=url,
+            version=version,
+            cameras=cameras_json_list,
+            logger=logger,
+        )
 
     # --- Vision worker (optional) ---
     vision = None
@@ -661,27 +831,29 @@ def main() -> int:
     consecutive_auth_failures = 0
     last_camera_sync_at = 0.0
     last_update_check_at = 0.0
-    camera_states: dict[str, dict[str, Any]] = {}
     camera_auth_tracker = AuthFailureTracker(max_failures=MAX_CONSECUTIVE_AUTH_FAILURES)
     camera_sync_interval = max(
         CAMERA_SYNC_INTERVAL_SECONDS,
         settings.camera_heartbeat_interval_seconds,
     )
 
-    if not camera_sync_enabled and cameras_json_list:
+    if local_cameras_mode:
         logger.info(
-            "[CAMERA_HEALTH] using CAMERAS_JSON source (sync disabled) cameras=%s",
+            "[CAMERA_HEALTH] using CAMERAS_JSON source cameras=%s interval=%ss",
             len(cameras_json_list),
+            camera_health_interval_seconds,
         )
         t = threading.Thread(
             target=_camera_health_loop,
             kwargs={
                 "cloud_base_url": settings.cloud_base_url,
                 "edge_token": settings.edge_token,
+                "store_id": settings.store_id,
+                "agent_id": settings.agent_id,
                 "cameras": cameras_json_list,
                 "interval_seconds": camera_health_interval_seconds,
-                "perform_describe": settings.rtsp_describe_enabled,
                 "logger": logger,
+                "state_store": camera_states,
             },
             daemon=True,
         )
@@ -700,7 +872,7 @@ def main() -> int:
             )
             if cameras_error:
                 logger.warning("Camera sync skipped: %s", cameras_error)
-                if cameras_json_list and not camera_health_loop_started:
+                if local_cameras_mode and not camera_health_loop_started:
                     logger.warning(
                         "[CAMERA_HEALTH] camera sync failed; starting CAMERAS_JSON fallback cameras=%s",
                         len(cameras_json_list),
@@ -710,10 +882,12 @@ def main() -> int:
                         kwargs={
                             "cloud_base_url": settings.cloud_base_url,
                             "edge_token": settings.edge_token,
+                            "store_id": settings.store_id,
+                            "agent_id": settings.agent_id,
                             "cameras": cameras_json_list,
                             "interval_seconds": camera_health_interval_seconds,
-                            "perform_describe": settings.rtsp_describe_enabled,
                             "logger": logger,
+                            "state_store": camera_states,
                         },
                         daemon=True,
                     )
@@ -868,6 +1042,8 @@ def main() -> int:
                         ok_evt, status_evt, err_evt = send_camera_health_event(
                             cloud_base_url=settings.cloud_base_url,
                             edge_token=settings.edge_token,
+                            store_id=settings.store_id,
+                            agent_id=settings.agent_id,
                             camera_health=health,
                             logger=logger,
                             auth_tracker=camera_auth_tracker,

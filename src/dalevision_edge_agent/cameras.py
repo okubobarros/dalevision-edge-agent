@@ -20,6 +20,7 @@ ROI_ENDPOINTS = (
     "/api/v1/cameras/{camera_id}/roi/latest",
 )
 HEALTH_ENDPOINT = "/api/v1/cameras/{camera_id}/health/"
+EDGE_EVENTS_ENDPOINT = "/api/edge/events/"
 
 HTTP_TIMEOUT_SECONDS = 5
 HEALTHCHECK_TIMEOUT_SECONDS = 3
@@ -437,6 +438,8 @@ def send_camera_health_event(
     *,
     cloud_base_url: str,
     edge_token: str,
+    store_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
     camera_health: dict[str, Any],
     timeout_seconds: int = HTTP_TIMEOUT_SECONDS,
     logger: Optional[logging.Logger] = None,
@@ -444,38 +447,55 @@ def send_camera_health_event(
 ) -> tuple[bool, Optional[int], Optional[str]]:
     logger = logger or logging.getLogger("dalevision-edge-agent")
     camera_id = camera_health.get("camera_id")
-    url = f"{_normalize_base_url(cloud_base_url)}{HEALTH_ENDPOINT.format(camera_id=camera_id)}"
-    payload = {
+    url = f"{_normalize_base_url(cloud_base_url)}{EDGE_EVENTS_ENDPOINT}"
+    event_payload = {
+        "store_id": store_id or camera_health.get("store_id") or "",
+        "agent_id": agent_id or camera_health.get("agent_id") or "",
+        "event_name": "camera_health",
+        "ts": camera_health.get("checked_at") or _utc_timestamp(),
+        "camera_id": camera_id,
         "status": camera_health.get("status"),
         "latency_ms": camera_health.get("latency_ms"),
         "error": camera_health.get("error"),
-        "ts": _utc_timestamp(),
     }
     snapshot_url = camera_health.get("snapshot_url")
     if snapshot_url:
-        payload["snapshot_url"] = snapshot_url
+        event_payload["snapshot_url"] = snapshot_url
     if "snapshot_taken" in camera_health:
-        payload["snapshot_taken"] = camera_health.get("snapshot_taken")
+        event_payload["snapshot_taken"] = camera_health.get("snapshot_taken")
     if "snapshot_local_path" in camera_health:
-        payload["snapshot_local_path"] = camera_health.get("snapshot_local_path")
+        event_payload["snapshot_local_path"] = camera_health.get("snapshot_local_path")
     if "snapshot_status" in camera_health:
-        payload["snapshot_status"] = camera_health.get("snapshot_status")
+        event_payload["snapshot_status"] = camera_health.get("snapshot_status")
+    envelope = {
+        "event_name": "camera_health",
+        "source": "edge",
+        "ts": event_payload["ts"],
+        "data": event_payload,
+    }
     response, status, error = _request_json_with_backoff(
         method="POST",
         url=url,
         headers=build_auth_headers(edge_token),
-        json_body=payload,
+        json_body=envelope,
         timeout_seconds=timeout_seconds,
         logger=logger,
         auth_tracker=auth_tracker,
     )
     ok = response is not None and status is not None and 200 <= status < 300
     if ok:
+        logger.info(
+            "camera_id=%s health POST %s status=%s",
+            camera_id,
+            url,
+            status,
+        )
         return True, status, None
     detail = error or (f"HTTP {status}" if status else None)
     logger.warning(
-        "camera_id=%s health event rejected (status=%s detail=%s)",
+        "camera_id=%s health POST rejected url=%s status=%s detail=%s",
         camera_health.get("camera_id"),
+        url,
         status,
         detail,
     )

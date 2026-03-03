@@ -29,6 +29,7 @@ def test_run_install_service_fallback_when_script_missing_and_not_admin(monkeypa
     monkeypatch.setattr(agent_main, "_resolve_install_service_script", lambda: (None, [], Path.cwd()))
     monkeypatch.setattr(agent_main, "_is_windows_admin", lambda: False)
     monkeypatch.setattr(agent_main, "_create_startup_shortcut", lambda logger: (True, "startup ok"))
+    monkeypatch.setattr("builtins.input", lambda _prompt="": "n")
 
     rc = agent_main._run_install_service_command(logger=logger)
 
