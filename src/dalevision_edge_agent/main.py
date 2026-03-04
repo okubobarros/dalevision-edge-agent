@@ -45,6 +45,10 @@ MAX_CONSECUTIVE_FAILURES = 10
 EXIT_CONFIG_ERROR = 2
 EXIT_AUTH_ERROR = 3
 EXIT_NETWORK_ERROR = 4
+WATCHDOG_DEFAULT_HEARTBEAT_GRACE_SECONDS = 120
+WATCHDOG_DEFAULT_CAMERA_HEALTH_GRACE_SECONDS = 180
+WATCHDOG_DEFAULT_RESTART_WINDOW_SECONDS = 600
+WATCHDOG_DEFAULT_RESTART_MAX = 3
 
 
 def _candidate_install_roots() -> list[Path]:
@@ -415,6 +419,110 @@ def _parse_cameras_json(
     return cameras, None
 
 
+def _restart_self(
+    *,
+    reason: str,
+    logger: logging.Logger,
+    restart_enabled: bool,
+    restart_max: int,
+    restart_window_seconds: int,
+) -> None:
+    if not restart_enabled:
+        logger.warning("[WATCHDOG] restart disabled (reason=%s)", reason)
+        return
+
+    now = int(time.time())
+    raw_count = os.getenv("EDGE_RESTART_COUNT") or "0"
+    raw_last = os.getenv("EDGE_RESTART_LAST_TS") or "0"
+    try:
+        count = int(raw_count)
+    except Exception:
+        count = 0
+    try:
+        last_ts = int(raw_last)
+    except Exception:
+        last_ts = 0
+
+    if last_ts and now - last_ts > restart_window_seconds:
+        count = 0
+
+    if count >= restart_max:
+        logger.error(
+            "[WATCHDOG] restart limit reached count=%s window=%ss reason=%s",
+            count,
+            restart_window_seconds,
+            reason,
+        )
+        return
+
+    count += 1
+    os.environ["EDGE_RESTART_COUNT"] = str(count)
+    os.environ["EDGE_RESTART_LAST_TS"] = str(now)
+
+    argv = sys.argv[:]
+    if not argv:
+        argv = [sys.executable, "-m", "dalevision_edge_agent.main"]
+    elif argv[0].endswith(".py"):
+        argv = [sys.executable] + argv
+
+    logger.error("[WATCHDOG] restarting self reason=%s count=%s argv=%s", reason, count, argv)
+    try:
+        subprocess.Popen(argv, cwd=os.getcwd())
+    except Exception as exc:
+        logger.error("[WATCHDOG] restart failed: %s", exc)
+        return
+    os._exit(1)
+
+
+def _watchdog_loop(
+    *,
+    logger: logging.Logger,
+    state: dict[str, Any],
+    lock: threading.Lock,
+    heartbeat_grace_seconds: int,
+    camera_health_grace_seconds: int,
+    restart_enabled: bool,
+    restart_max: int,
+    restart_window_seconds: int,
+) -> None:
+    while True:
+        time.sleep(5)
+        now = time.time()
+        with lock:
+            hb_ok_at = state.get("last_heartbeat_ok_at")
+            hb_status = state.get("last_heartbeat_status")
+            hb_error = state.get("last_heartbeat_error")
+            ch_ok_at = state.get("last_camera_health_ok_at")
+            has_cameras = bool(state.get("has_cameras"))
+            auth_fail = hb_status in AUTH_FAILURE_STATUSES
+
+        if hb_ok_at and now - hb_ok_at > heartbeat_grace_seconds:
+            if auth_fail:
+                logger.warning(
+                    "[WATCHDOG] heartbeat stale but auth failed (status=%s error=%s)",
+                    hb_status,
+                    hb_error,
+                )
+            else:
+                _restart_self(
+                    reason="heartbeat_stale",
+                    logger=logger,
+                    restart_enabled=restart_enabled,
+                    restart_max=restart_max,
+                    restart_window_seconds=restart_window_seconds,
+                )
+                continue
+
+        if has_cameras and ch_ok_at and now - ch_ok_at > camera_health_grace_seconds:
+            _restart_self(
+                reason="camera_health_stale",
+                logger=logger,
+                restart_enabled=restart_enabled,
+                restart_max=restart_max,
+                restart_window_seconds=restart_window_seconds,
+            )
+
+
 def _auto_set_vision_model_path(logger: logging.Logger) -> None:
     if os.getenv("VISION_MODEL_PATH"):
         return
@@ -521,6 +629,8 @@ def _run_camera_health_once(
     cameras: list[dict[str, Any]],
     logger: logging.Logger,
     state_store: Optional[dict[str, dict[str, Any]]] = None,
+    watchdog_state: Optional[dict[str, Any]] = None,
+    watchdog_lock: Optional[threading.Lock] = None,
 ) -> int:
     posted = 0
     cycle_started_at = time.time()
@@ -534,7 +644,7 @@ def _run_camera_health_once(
         raw_health = check_camera_health(
             {"id": camera_id, "rtsp_url": rtsp_url},
             timeout_seconds=6,
-            perform_describe=True,
+            perform_describe=False,
             rtsp_url_override=rtsp_url,
         )
         raw_health["camera_id"] = camera_id
@@ -578,6 +688,10 @@ def _run_camera_health_once(
         posted,
         elapsed_ms,
     )
+    if posted > 0 and watchdog_state is not None and watchdog_lock is not None:
+        with watchdog_lock:
+            watchdog_state["last_camera_health_ok_at"] = time.time()
+            watchdog_state["has_cameras"] = True
     return posted
 
 
@@ -591,6 +705,8 @@ def _camera_health_loop(
     interval_seconds: int,
     logger: logging.Logger,
     state_store: Optional[dict[str, dict[str, Any]]] = None,
+    watchdog_state: Optional[dict[str, Any]] = None,
+    watchdog_lock: Optional[threading.Lock] = None,
 ) -> None:
     while True:
         try:
@@ -602,6 +718,8 @@ def _camera_health_loop(
                 cameras=cameras,
                 logger=logger,
                 state_store=state_store,
+                watchdog_state=watchdog_state,
+                watchdog_lock=watchdog_lock,
             )
         except Exception as exc:
             logger.exception("[CAMERA_HEALTH] loop error: %s", exc)
@@ -691,6 +809,8 @@ def main() -> int:
             logger=logger,
             nvr_ip=args.nvr_ip,
             share=bool(args.share),
+            store_id=os.getenv("STORE_ID") or os.getenv("DALE_STORE_ID"),
+            edge_token=os.getenv("EDGE_TOKEN") or os.getenv("DALE_EDGE_TOKEN"),
         )
         return 0
 
@@ -810,8 +930,42 @@ def main() -> int:
         "CAMERA_HEALTH_INTERVAL_SECONDS",
         settings.camera_heartbeat_interval_seconds or 30,
     )
+    if camera_health_interval_seconds > 60:
+        logger.warning(
+            "[CAMERA_HEALTH] interval too high (%ss); clamping to 60s",
+            camera_health_interval_seconds,
+        )
+        camera_health_interval_seconds = 60
     camera_health_loop_started = False
     camera_states: dict[str, dict[str, Any]] = {}
+
+    watchdog_enabled = _parse_bool_env("WATCHDOG_ENABLED", True)
+    watchdog_restart_enabled = _parse_bool_env("WATCHDOG_RESTART_ENABLED", True)
+    watchdog_hb_grace = _parse_int_env(
+        "WATCHDOG_HEARTBEAT_GRACE_SECONDS",
+        WATCHDOG_DEFAULT_HEARTBEAT_GRACE_SECONDS,
+    )
+    watchdog_ch_grace = _parse_int_env(
+        "WATCHDOG_CAMERA_HEALTH_GRACE_SECONDS",
+        WATCHDOG_DEFAULT_CAMERA_HEALTH_GRACE_SECONDS,
+    )
+    watchdog_restart_window = _parse_int_env(
+        "WATCHDOG_RESTART_WINDOW_SECONDS",
+        WATCHDOG_DEFAULT_RESTART_WINDOW_SECONDS,
+    )
+    watchdog_restart_max = _parse_int_env(
+        "WATCHDOG_RESTART_MAX",
+        WATCHDOG_DEFAULT_RESTART_MAX,
+    )
+
+    watchdog_state: dict[str, Any] = {
+        "last_heartbeat_ok_at": time.time(),
+        "last_camera_health_ok_at": time.time(),
+        "last_heartbeat_status": None,
+        "last_heartbeat_error": None,
+        "has_cameras": bool(local_cameras_mode and cameras_json_list),
+    }
+    watchdog_lock = threading.Lock()
     if args.smoke and args.smoke > 0:
         return _run_smoke(
             seconds=args.smoke,
@@ -875,9 +1029,11 @@ def main() -> int:
     last_camera_sync_at = 0.0
     last_update_check_at = 0.0
     camera_auth_tracker = AuthFailureTracker(max_failures=MAX_CONSECUTIVE_AUTH_FAILURES)
-    camera_sync_interval = max(
+    camera_sync_interval = min(
         CAMERA_SYNC_INTERVAL_SECONDS,
         settings.camera_heartbeat_interval_seconds,
+        settings.heartbeat_interval_seconds,
+        60,
     )
 
     if local_cameras_mode:
@@ -897,11 +1053,36 @@ def main() -> int:
                 "interval_seconds": camera_health_interval_seconds,
                 "logger": logger,
                 "state_store": camera_states,
+                "watchdog_state": watchdog_state,
+                "watchdog_lock": watchdog_lock,
             },
             daemon=True,
         )
         t.start()
         camera_health_loop_started = True
+
+    if watchdog_enabled:
+        t_watchdog = threading.Thread(
+            target=_watchdog_loop,
+            kwargs={
+                "logger": logger,
+                "state": watchdog_state,
+                "lock": watchdog_lock,
+                "heartbeat_grace_seconds": watchdog_hb_grace,
+                "camera_health_grace_seconds": watchdog_ch_grace,
+                "restart_enabled": watchdog_restart_enabled,
+                "restart_max": watchdog_restart_max,
+                "restart_window_seconds": watchdog_restart_window,
+            },
+            daemon=True,
+        )
+        t_watchdog.start()
+        logger.info(
+            "[WATCHDOG] enabled hb_grace=%ss ch_grace=%ss restart=%s",
+            watchdog_hb_grace,
+            watchdog_ch_grace,
+            watchdog_restart_enabled,
+        )
 
     while True:
         now = time.time()
@@ -950,6 +1131,9 @@ def main() -> int:
             else:
                 fresh_states: dict[str, dict[str, Any]] = {}
                 active_cameras = [c for c in cameras if _is_camera_active(c)]
+                if active_cameras:
+                    with watchdog_lock:
+                        watchdog_state["has_cameras"] = True
                 if len(active_cameras) > settings.max_active_cameras:
                     ignored = active_cameras[settings.max_active_cameras :]
                     ignored_ids = [
@@ -1098,6 +1282,10 @@ def main() -> int:
                                 status_evt,
                                 err_evt,
                             )
+                        else:
+                            with watchdog_lock:
+                                watchdog_state["last_camera_health_ok_at"] = time.time()
+                                watchdog_state["has_cameras"] = True
                         if camera_auth_tracker.consecutive >= MAX_CONSECUTIVE_AUTH_FAILURES:
                             message = (
                                 f"ERRO FATAL: {MAX_CONSECUTIVE_AUTH_FAILURES} falhas de "
@@ -1134,6 +1322,12 @@ def main() -> int:
             timeout_seconds=REQUEST_TIMEOUT_SECONDS,
             extra_data=camera_fields,
         )
+
+        with watchdog_lock:
+            watchdog_state["last_heartbeat_status"] = status
+            watchdog_state["last_heartbeat_error"] = error
+            if ok:
+                watchdog_state["last_heartbeat_ok_at"] = time.time()
 
         if status is None:
             print(f"Heartbeat -> {url} status=ERROR")

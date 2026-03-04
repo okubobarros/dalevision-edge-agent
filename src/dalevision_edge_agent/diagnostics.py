@@ -14,7 +14,7 @@ import time
 from typing import Any, Optional
 
 import requests
-from .cameras import detect_snapshot_support
+from .cameras import build_auth_headers, detect_snapshot_support
 
 NVR_PORTS = (80, 443, 554, 37777)
 
@@ -205,6 +205,9 @@ def _summarize(
     snapshot_ok: bool,
     permissions_ok: bool,
     internet_ok: bool,
+    edge_auth_ok: Optional[bool] = None,
+    edge_cameras_count: Optional[int] = None,
+    edge_auth_error: Optional[str] = None,
 ) -> str:
     lines = []
     lines.append("DALE Vision Edge Agent - Diagnostics")
@@ -221,6 +224,12 @@ def _summarize(
     lines.append(f"internet_ok={'sim' if internet_ok else 'nao'}")
     lines.append(f"snapshot_ok={'sim' if snapshot_ok else 'nao'}")
     lines.append(f"write_ok={'sim' if permissions_ok else 'nao'}")
+    if edge_auth_ok is not None:
+        lines.append(f"edge_auth_ok={'sim' if edge_auth_ok else 'nao'}")
+    if edge_cameras_count is not None:
+        lines.append(f"edge_cameras_count={edge_cameras_count}")
+    if edge_auth_error:
+        lines.append(f"edge_auth_error={edge_auth_error}")
     if not gateway:
         lines.append("NET001 sem gateway padrao")
     if nvr_ip:
@@ -232,12 +241,49 @@ def _summarize(
     return "\n".join(lines)
 
 
+def _edge_auth_check(
+    *,
+    cloud_base_url: str,
+    store_id: Optional[str],
+    edge_token: Optional[str],
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    if not cloud_base_url or not store_id or not edge_token:
+        return {"ok": False, "error": "missing_store_or_token"}
+    url = f"{cloud_base_url.rstrip('/')}/api/v1/stores/{store_id}/cameras/"
+    try:
+        response = requests.get(url, headers=build_auth_headers(edge_token), timeout=5)
+        status = response.status_code
+        if 200 <= status < 300:
+            payload = {}
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {}
+            cameras = payload.get("results") if isinstance(payload, dict) else None
+            if cameras is None and isinstance(payload, list):
+                cameras = payload
+            count = len(cameras) if isinstance(cameras, list) else None
+            return {"ok": True, "status": status, "count": count}
+        detail = None
+        try:
+            detail = response.json()
+        except Exception:
+            detail = response.text.strip()[:500] if response.text else None
+        return {"ok": False, "status": status, "error": detail or f"HTTP {status}"}
+    except requests.RequestException as exc:
+        logger.info("EDGEAUTH url=%s error=%s", url, exc)
+        return {"ok": False, "error": str(exc)}
+
+
 def run_doctor(
     *,
     cloud_base_url: str,
     logger: logging.Logger,
     nvr_ip: Optional[str] = None,
     share: bool = False,
+    store_id: Optional[str] = None,
+    edge_token: Optional[str] = None,
 ) -> dict[str, Any]:
     ipconfig_text = _run_cmd("ipconfig /all")
     route_text = _run_cmd("route print")
@@ -255,6 +301,12 @@ def run_doctor(
     dns_check = _dns_check()
     internet_check = _internet_check()
     snapshot_support = detect_snapshot_support(logger)
+    edge_auth_check = _edge_auth_check(
+        cloud_base_url=cloud_base_url,
+        store_id=store_id,
+        edge_token=edge_token,
+        logger=logger,
+    )
 
     log_dir = _log_dir()
     disk_check = _disk_check(log_dir)
@@ -294,6 +346,9 @@ def run_doctor(
         snapshot_ok=bool(snapshot_support.get("ffmpeg")) or snapshot_support.get("opencv") == "yes",
         permissions_ok=bool(permissions_check.get("ok")),
         internet_ok=bool(internet_check.get("ok")),
+        edge_auth_ok=edge_auth_check.get("ok") if edge_auth_check else None,
+        edge_cameras_count=edge_auth_check.get("count") if edge_auth_check else None,
+        edge_auth_error=edge_auth_check.get("error") if edge_auth_check else None,
     )
 
     diagnostics_id = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -315,6 +370,7 @@ def run_doctor(
         "dns_check": dns_check,
         "internet_check": internet_check,
         "snapshot_support": snapshot_support,
+        "edge_auth_check": edge_auth_check,
         "disk_check": disk_check,
         "permissions_check": permissions_check,
         "scan_results": [],

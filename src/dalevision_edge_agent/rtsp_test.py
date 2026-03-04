@@ -53,6 +53,19 @@ def test_rtsp(
         rtsp_url_override=rtsp_url,
         timeout_seconds=timeout_seconds,
     )
+    error = str(health.get("error") or "unknown")
+    if health.get("status") not in {"online", "degraded"} and "unauthorized" in error:
+        # Many NVRs answer 401 on the first DESCRIBE and require Digest challenge/retry.
+        # Fallback to plain RTSP socket connectivity to avoid false negatives.
+        fallback_health = check_camera_health(
+            {"ip": ip},
+            perform_describe=False,
+            rtsp_url_override=rtsp_url,
+            timeout_seconds=timeout_seconds,
+        )
+        if fallback_health.get("status") in {"online", "degraded"}:
+            logger.info("RTSPTEST digest challenge detected; connectivity fallback succeeded")
+            health = fallback_health
 
     if health.get("status") not in {"online", "degraded"}:
         error = str(health.get("error") or "unknown")
