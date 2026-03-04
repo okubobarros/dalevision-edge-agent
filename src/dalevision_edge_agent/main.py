@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+from datetime import datetime, timezone
 import importlib.metadata
 import json
 import logging
@@ -27,6 +28,7 @@ from .cameras import (
     fetch_roi,
     mask_rtsp_url,
     send_camera_health_event,
+    send_vision_metrics_event,
 )
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, load_env_from_cwd, load_settings
@@ -49,6 +51,8 @@ WATCHDOG_DEFAULT_HEARTBEAT_GRACE_SECONDS = 120
 WATCHDOG_DEFAULT_CAMERA_HEALTH_GRACE_SECONDS = 180
 WATCHDOG_DEFAULT_RESTART_WINDOW_SECONDS = 600
 WATCHDOG_DEFAULT_RESTART_MAX = 3
+VISION_PROXY_DEFAULT_BUCKET_SECONDS = 30
+VISION_PROXY_DEFAULT_BUCKET_SECONDS = 30
 
 
 def _candidate_install_roots() -> list[Path]:
@@ -769,6 +773,16 @@ def _run_smoke(
     return 0 if all_ok else 1
 
 
+def _floor_bucket(ts: float, bucket_seconds: int) -> tuple[str, str]:
+    bucket_start = int(ts // bucket_seconds) * bucket_seconds
+    start_dt = datetime.fromtimestamp(bucket_start, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(bucket_start + bucket_seconds, tz=timezone.utc)
+    return (
+        start_dt.isoformat().replace("+00:00", "Z"),
+        end_dt.isoformat().replace("+00:00", "Z"),
+    )
+
+
 def main() -> int:
     args = _parse_args()
     env_path = load_env_from_cwd()
@@ -966,6 +980,12 @@ def main() -> int:
         "has_cameras": bool(local_cameras_mode and cameras_json_list),
     }
     watchdog_lock = threading.Lock()
+    vision_proxy_enabled = _parse_bool_env("VISION_PROXY_ENABLED", False)
+    vision_bucket_seconds = _parse_int_env(
+        "VISION_BUCKET_SECONDS",
+        VISION_PROXY_DEFAULT_BUCKET_SECONDS,
+    )
+    last_vision_bucket_at = 0.0
     if args.smoke and args.smoke > 0:
         return _run_smoke(
             seconds=args.smoke,
@@ -1341,6 +1361,53 @@ def main() -> int:
             last_failure_status = None
             consecutive_auth_failures = 0
             now = time.time()
+            if vision_proxy_enabled and now - last_vision_bucket_at >= vision_bucket_seconds:
+                online_cameras = sum(
+                    1 for state in camera_states.values() if state.get("status") == "online"
+                )
+                footfall = online_cameras * 2
+                engaged = max(0, footfall - 1)
+                bucket_start, bucket_end = _floor_bucket(now, vision_bucket_seconds)
+                payload = {
+                    "store_id": settings.store_id,
+                    "agent_id": settings.agent_id,
+                    "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "proxy": True,
+                    "bucket": {
+                        "start": bucket_start,
+                        "end": bucket_end,
+                        "seconds": vision_bucket_seconds,
+                    },
+                    "traffic": {
+                        "footfall": footfall,
+                        "engaged": engaged,
+                        "dwell_seconds_avg": 30 if footfall > 0 else 0,
+                    },
+                    "conversion": {
+                        "queue_avg_seconds": 15 if footfall > 0 else 0,
+                        "staff_active_est": 1 if footfall > 0 else 0,
+                    },
+                }
+                ok_evt, status_evt, err_evt = send_vision_metrics_event(
+                    cloud_base_url=settings.cloud_base_url,
+                    edge_token=settings.edge_token,
+                    payload=payload,
+                    timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+                    logger=logger,
+                )
+                if ok_evt:
+                    last_vision_bucket_at = now
+                    logger.info(
+                        "[VISION_PROXY] bucket sent footfall=%s engaged=%s",
+                        footfall,
+                        engaged,
+                    )
+                else:
+                    logger.warning(
+                        "[VISION_PROXY] bucket failed status=%s error=%s",
+                        status_evt,
+                        err_evt,
+                    )
             if now - last_update_check_at >= settings.update_interval_seconds:
                 update = check_for_update(
                     logger=logger,

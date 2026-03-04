@@ -508,6 +508,39 @@ def send_camera_health_event(
     return False, status, detail
 
 
+def send_vision_metrics_event(
+    *,
+    cloud_base_url: str,
+    edge_token: str,
+    payload: dict[str, Any],
+    timeout_seconds: int = HTTP_TIMEOUT_SECONDS,
+    logger: Optional[logging.Logger] = None,
+) -> tuple[bool, Optional[int], Optional[str]]:
+    logger = logger or logging.getLogger("dalevision-edge-agent")
+    url = f"{_normalize_base_url(cloud_base_url)}{EDGE_EVENTS_ENDPOINT}"
+    envelope = {
+        "event_name": "vision.metrics.v1",
+        "source": "edge",
+        "ts": payload.get("ts"),
+        "data": payload,
+    }
+    response, status, error = _request_json_with_backoff(
+        method="POST",
+        url=url,
+        headers=build_auth_headers(edge_token),
+        json_body=envelope,
+        timeout_seconds=timeout_seconds,
+        logger=logger,
+    )
+    ok = response is not None and status is not None and 200 <= status < 300
+    if ok:
+        logger.info("vision metrics POST %s status=%s", url, status)
+        return True, status, None
+    detail = error or (f"HTTP {status}" if status else None)
+    logger.warning("vision metrics POST rejected url=%s status=%s detail=%s", url, status, detail)
+    return False, status, detail
+
+
 def build_rtsp_candidates(camera: dict[str, Any]) -> list[str]:
     rtsp_url = _extract_rtsp_url(camera)
     host, port = _extract_rtsp_host_port(camera)
