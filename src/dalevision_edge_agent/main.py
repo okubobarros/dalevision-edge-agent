@@ -92,6 +92,22 @@ def _resolve_run_agent_cmd() -> tuple[Path | None, list[Path]]:
     return None, checked
 
 
+def _resolve_agent_executable() -> tuple[Path | None, list[Path]]:
+    checked: list[Path] = []
+    names = (
+        "dalevision-edge-agent.exe",
+        "DaleVisionEdge.exe",
+        "DaleVision Edge Agent.exe",
+    )
+    for root in _candidate_install_roots():
+        for name in names:
+            candidate = root / name
+            checked.append(candidate)
+            if candidate.exists():
+                return candidate, checked
+    return None, checked
+
+
 def _is_windows_admin() -> bool:
     try:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
@@ -144,16 +160,24 @@ def _create_startup_shortcut(*, logger: logging.Logger) -> tuple[bool, str]:
 
 
 def _create_logon_scheduled_task(*, logger: logging.Logger) -> tuple[bool, str]:
-    run_cmd, checked = _resolve_run_agent_cmd()
-    if run_cmd is None:
+    agent_exe, checked = _resolve_agent_executable()
+    run_target: Optional[Path] = agent_exe
+    if run_target is None:
+        run_cmd, checked_cmd = _resolve_run_agent_cmd()
+        checked.extend(checked_cmd)
+        run_target = run_cmd
+    if run_target is None:
         searched = ", ".join(str(p) for p in checked)
-        return False, f"Fallback schtasks indisponivel: run_agent.cmd nao encontrado. Procurado em: {searched}"
+        return False, (
+            "Fallback schtasks indisponivel: executavel/run_agent.cmd nao encontrado. "
+            f"Procurado em: {searched}"
+        )
 
-    install_dir = run_cmd.parent
+    install_dir = run_target.parent
     task_name = "DaleVisionEdgeAgentUser"
-    run_cmd_escaped = str(run_cmd).replace('"', '""')
+    run_target_escaped = str(run_target).replace('"', '""')
     install_dir_escaped = str(install_dir).replace('"', '""')
-    task_cmd = f'cmd.exe /c "cd /d ""{install_dir_escaped}"" && ""{run_cmd_escaped}"""'
+    task_cmd = f'cmd.exe /c "cd /d ""{install_dir_escaped}"" && ""{run_target_escaped}"""'
     create_cmd = [
         "schtasks",
         "/Create",
@@ -170,7 +194,12 @@ def _create_logon_scheduled_task(*, logger: logging.Logger) -> tuple[bool, str]:
         detail = (result.stderr or result.stdout or "erro desconhecido").strip()
         logger.warning("Scheduled task fallback failed: %s", detail)
         return False, f"Fallback schtasks falhou: {detail}"
-    logger.info("Scheduled task fallback ready task=%s install_dir=%s", task_name, install_dir)
+    logger.info(
+        "Scheduled task fallback ready task=%s install_dir=%s target=%s",
+        task_name,
+        install_dir,
+        run_target,
+    )
     return True, f"Fallback schtasks configurado: {task_name} (logon do usuario atual)"
 
 
@@ -494,6 +523,8 @@ def _run_camera_health_once(
     state_store: Optional[dict[str, dict[str, Any]]] = None,
 ) -> int:
     posted = 0
+    cycle_started_at = time.time()
+    logger.info("[CAMERA_HEALTH] cycle_start cameras=%s", len(cameras))
     for camera in cameras:
         camera_id = str(camera.get("id") or camera.get("camera_id") or "").strip()
         rtsp_url = str(camera.get("rtsp_url") or "").strip()
@@ -540,6 +571,13 @@ def _run_camera_health_once(
                 "error": health.get("error"),
                 "latency_ms": health.get("latency_ms"),
             }
+    elapsed_ms = int((time.time() - cycle_started_at) * 1000)
+    logger.info(
+        "[CAMERA_HEALTH] cycle_end cameras=%s posted=%s elapsed_ms=%s",
+        len(cameras),
+        posted,
+        elapsed_ms,
+    )
     return posted
 
 
@@ -602,10 +640,15 @@ def _run_smoke(
         logger=logger,
     )
     print(f"OK: posted {posted} camera_health events")
+    all_ok = bool(hb_ok) and posted == len(cameras)
+    print(
+        "SMOKE summary: "
+        f"heartbeat_ok={hb_ok} heartbeat_status={hb_status} camera_health_posted={posted}/{len(cameras)} result={'OK' if all_ok else 'FAIL'}"
+    )
     if seconds > 1:
         sleep_for = min(seconds, 5)
         time.sleep(sleep_for)
-    return 0 if posted > 0 else 1
+    return 0 if all_ok else 1
 
 
 def main() -> int:

@@ -501,7 +501,7 @@ def send_camera_health_event(
     )
     if status in AUTH_FAILURE_STATUSES:
         logger.warning(
-            "Health event auth failed url=%s status=%s hint=token invalido ou sem permissao",
+            "[CAMERA_HEALTH] auth_fail url=%s status=%s hint=token invalido ou sem permissao",
             url,
             status,
         )
