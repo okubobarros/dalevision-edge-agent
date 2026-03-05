@@ -39,8 +39,7 @@ net session >nul 2>&1
 if %errorlevel% neq 0 (
   echo Solicitando permissao de administrador...
   echo Not admin - elevating PowerShell uninstall...>> "%LOG%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%PS1%"" -TaskName ""%TASK_NAME%""' -Wait"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%PS1%"" -TaskName ""%TASK_NAME%""' -Wait"
   set "exit_code=%errorlevel%"
   echo ELEVATED_EXIT_CODE=%exit_code%>> "%LOG%"
   echo.
