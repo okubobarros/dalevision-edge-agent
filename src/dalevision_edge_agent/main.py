@@ -915,7 +915,8 @@ def main() -> int:
     camera_sync_enabled = _parse_bool_env("CAMERA_SYNC_ENABLED", True)
     if vision_source == "video" and (camera_sync_enabled_raw is None or camera_sync_enabled_raw.strip() == ""):
         camera_sync_enabled = False
-    camera_sync_fatal = _parse_bool_env("CAMERA_SYNC_FATAL", True)
+    # Keep edge online even when camera sync/auth is degraded; camera health is reported separately.
+    camera_sync_fatal = _parse_bool_env("CAMERA_SYNC_FATAL", False)
     logger.info(
         "Camera sync config enabled=%s fatal=%s vision_source=%s",
         camera_sync_enabled,

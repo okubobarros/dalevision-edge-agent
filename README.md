@@ -10,6 +10,16 @@ Agente local para manter a loja online no cloud e monitorar a saúde das câmera
 5. Verifique: execute `03_VERIFICAR_STATUS.bat`.
 6. Para remover: execute `04_REMOVER_AUTOSTART.bat`.
 
+## Configuração recomendada (produção)
+- Manter heartbeat sempre ativo mesmo com falhas temporárias de câmeras:
+```
+CAMERA_SYNC_FATAL=0
+```
+- Cenário remoto (fora da rede da loja), opcional para evitar ruído de autenticação/sync:
+```
+CAMERA_SYNC_ENABLED=0
+```
+
 ## Vision (detecções CV)
 Ative o pipeline mínimo (ocioso, fila, celular) por env:
 ```
