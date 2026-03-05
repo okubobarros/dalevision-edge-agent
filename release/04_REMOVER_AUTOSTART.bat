@@ -1,9 +1,8 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions
 
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-set "ARG1=%~1"
 
 set "PD=C:\ProgramData\DaleVision\EdgeAgent\dalevision-edge-agent-windows"
 if exist "%PD%\scripts\uninstall-service.ps1" (
@@ -23,13 +22,13 @@ echo ==== %date% %time% ====>> "%LOG%"
 echo ROOT=%ROOT%>> "%LOG%"
 echo TARGET=%TARGET%>> "%LOG%"
 echo BAT_PATH=%~f0>> "%LOG%"
-echo ARG1=%ARG1%>> "%LOG%"
 
-set "PS_CMD=PowerShell -NoProfile -ExecutionPolicy Bypass -File \"%TARGET%\scripts\uninstall-service.ps1\" -TaskName \"DaleVisionEdgeAgent\""
+set "PS1=%TARGET%\scripts\uninstall-service.ps1"
+set "TASK_NAME=DaleVisionEdgeAgent"
 
-if not exist "%TARGET%\scripts\uninstall-service.ps1" (
-  echo ERRO: script nao encontrado: %TARGET%\scripts\uninstall-service.ps1
-  echo ERRO: script nao encontrado: %TARGET%\scripts\uninstall-service.ps1>> "%LOG%"
+if not exist "%PS1%" (
+  echo ERRO: script nao encontrado: %PS1%
+  echo ERRO: script nao encontrado: %PS1%>> "%LOG%"
   echo.
   echo Log: %LOG%
   pause
@@ -39,9 +38,9 @@ if not exist "%TARGET%\scripts\uninstall-service.ps1" (
 net session >nul 2>&1
 if %errorlevel% neq 0 (
   echo Solicitando permissao de administrador...
-  echo Not admin - elevating self...>> "%LOG%"
-  PowerShell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$p = Start-Process -FilePath '%~f0' -Verb RunAs -ArgumentList '--elevated' -WindowStyle Normal -Wait -PassThru; exit $p.ExitCode"
+  echo Not admin - elevating PowerShell uninstall...>> "%LOG%"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%PS1%"" -TaskName ""%TASK_NAME%""' -Wait"
   set "exit_code=%errorlevel%"
   echo ELEVATED_EXIT_CODE=%exit_code%>> "%LOG%"
   echo.
@@ -57,7 +56,7 @@ if %errorlevel% neq 0 (
 )
 
 echo Running as admin.>> "%LOG%"
-%PS_CMD% >> "%LOG%" 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -TaskName "%TASK_NAME%" >> "%LOG%" 2>&1
 set "exit_code=%errorlevel%"
 echo UNINSTALL_EXIT_CODE=%exit_code%>> "%LOG%"
 
