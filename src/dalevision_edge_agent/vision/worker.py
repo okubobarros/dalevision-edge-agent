@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..cameras import build_auth_headers
+from ..cameras import build_auth_headers, fetch_roi
 from .geometry import line_side, point_in_polygon
 from .roi_yaml import load_roi_yaml
 from .sources.video import VideoFrameSource
@@ -43,6 +43,27 @@ def _safe_json_load(raw: str) -> dict:
 def _env_str(name: str, default: str) -> str:
     import os
     return os.getenv(name, default)
+
+
+def _slug(text: str) -> str:
+    value = (text or "").strip().lower()
+    replacements = {
+        "á": "a",
+        "à": "a",
+        "â": "a",
+        "ã": "a",
+        "é": "e",
+        "ê": "e",
+        "í": "i",
+        "ó": "o",
+        "ô": "o",
+        "õ": "o",
+        "ú": "u",
+        "ç": "c",
+    }
+    for src, dst in replacements.items():
+        value = value.replace(src, dst)
+    return value
 
 
 EDGE_CAMERA_ENDPOINTS = (
@@ -340,6 +361,84 @@ class VisionWorker:
             "external_id": str(cam.get("external_id") or cam.get("name") or "").strip(),
         }
 
+    def _canonical_shape_name(self, name: str) -> str:
+        value = _slug(name)
+        if not value:
+            return ""
+        if "funcionario" in value and "caixa" in value:
+            return "zona_funcionario_caixa"
+        if "pagamento" in value or "caixa" in value:
+            return "ponto_pagamento"
+        if "fila" in value or "espera" in value:
+            return "area_atendimento_fila"
+        if "consumo" in value or "salao" in value or "sala" in value or "mesa" in value:
+            return "area_consumo"
+        if "entrada" in value or "saida" in value or "porta" in value:
+            return "entrada"
+        return value.replace(" ", "_")
+
+    def _normalize_remote_roi_config(self, config_json: Any) -> Optional[dict]:
+        if not isinstance(config_json, dict):
+            return None
+        zones_raw = config_json.get("zones") or []
+        lines_raw = config_json.get("lines") or []
+        normalized_zones: list[dict[str, Any]] = []
+        normalized_lines: list[dict[str, Any]] = []
+
+        if isinstance(zones_raw, list):
+            for item in zones_raw:
+                if not isinstance(item, dict):
+                    continue
+                pts = item.get("points") or []
+                if not isinstance(pts, list) or not pts:
+                    continue
+                name = self._canonical_shape_name(str(item.get("name") or ""))
+                if not name:
+                    continue
+                normalized_zones.append({**item, "name": name})
+
+        if isinstance(lines_raw, list):
+            for item in lines_raw:
+                if not isinstance(item, dict):
+                    continue
+                pts = item.get("points") or []
+                if not isinstance(pts, list) or len(pts) != 2:
+                    continue
+                name = self._canonical_shape_name(str(item.get("name") or ""))
+                if not name:
+                    continue
+                normalized_lines.append({**item, "name": name})
+
+        if not normalized_zones and not normalized_lines:
+            return None
+
+        roi_version = config_json.get("roi_version")
+        return {
+            **config_json,
+            "zones": normalized_zones,
+            "lines": normalized_lines,
+            "roi_version": roi_version,
+        }
+
+    def _fetch_remote_roi_config(self, camera_id: str) -> Optional[dict]:
+        payload, roi_version, _cached, error = fetch_roi(
+            camera_id,
+            cloud_base_url=self.cloud_base_url,
+            edge_token=self.edge_token,
+            logger=self.logger,
+        )
+        if payload is None:
+            if error:
+                self.logger.warning("[VISION] remote ROI unavailable camera_id=%s error=%s", camera_id, error)
+            return None
+        config_json = payload.get("config_json") if isinstance(payload, dict) else None
+        normalized = self._normalize_remote_roi_config(config_json)
+        if normalized is None:
+            return None
+        if roi_version and not normalized.get("roi_version"):
+            normalized["roi_version"] = roi_version
+        return normalized
+
     def _apply_roi_to_cameras(self, cameras: List[dict]) -> List[dict]:
         if self._roi_override:
             if len(cameras) > 1:
@@ -355,7 +454,13 @@ class VisionWorker:
             camera_id = str(cam.get("camera_id") or cam.get("id") or "").strip()
             if not camera_id:
                 continue
-            cam["roi_local"] = self._load_roi_for_camera(camera_id)
+            local_roi = self._load_roi_for_camera(camera_id)
+            cam["roi_local"] = local_roi
+            if (local_roi.get("zones") or local_roi.get("lines")):
+                continue
+            remote_roi = self._fetch_remote_roi_config(camera_id)
+            if remote_roi is not None:
+                cam["roi"] = remote_roi
         return cameras
 
     def _save_cameras_cache(self, cameras: List[dict], *, source: str) -> None:
@@ -476,8 +581,31 @@ class VisionWorker:
     def _resolve_role(self, cam: dict) -> Optional[str]:
         if cam.get("role"):
             return str(cam.get("role"))
+        roi = cam.get("roi")
+        if isinstance(roi, dict):
+            zones = {}
+            for item in roi.get("zones") or []:
+                if not isinstance(item, dict):
+                    continue
+                name = self._canonical_shape_name(str(item.get("name") or ""))
+                pts = item.get("points") or []
+                if name and pts:
+                    zones[name] = pts
+            lines = {}
+            for item in roi.get("lines") or []:
+                if not isinstance(item, dict):
+                    continue
+                name = self._canonical_shape_name(str(item.get("name") or ""))
+                pts = item.get("points") or []
+                if name and len(pts) == 2:
+                    lines[name] = pts
+            inferred = self._infer_role_from_roi(zones, lines)
+            if inferred:
+                return inferred
         name = str(cam.get("name") or "").lower()
         ext = str(cam.get("external_id") or "").lower()
+        if "caixa" in name or "caixa" in ext or "checkout" in name or "checkout" in ext:
+            return "balcao"
         for role, key in self.cfg.role_map.items():
             if not key:
                 continue

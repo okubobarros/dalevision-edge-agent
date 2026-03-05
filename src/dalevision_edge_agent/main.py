@@ -933,7 +933,9 @@ def main() -> int:
         logger.info("[CAMERA_HEALTH] local cameras mode active; disabling remote camera sync")
         camera_sync_enabled = False
     if local_cameras_mode:
-        os.environ.setdefault("VISION_LOCAL_CAMERAS_ONLY", "1")
+        os.environ["VISION_LOCAL_CAMERAS_ONLY"] = "1"
+        os.environ["VISION_REMOTE_CAMERA_SYNC_ENABLED"] = "0"
+        os.environ["CAMERA_SYNC_ENABLED"] = "0"
     logger.info(
         "[CAMERA_HEALTH] local_mode=%s cameras_json=%s camera_sync_enabled=%s",
         local_cameras_mode,
