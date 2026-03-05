@@ -23,8 +23,12 @@ jobs:
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
-          python -m pip install .
+          python -m pip install ".[vision]"
           python -m pip install pyinstaller
+
+      - name: Verify vision runtime deps
+        run: |
+          python -c "import cv2, numpy, ultralytics; print('vision deps ok')"
 
       - name: Sanity check spec
         shell: pwsh
