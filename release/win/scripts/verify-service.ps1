@@ -74,7 +74,16 @@ function Show-TaskInfo {
 }
 
 $installRoot = Split-Path -Parent $PSScriptRoot
-$agentLog = Join-Path $installRoot "logs\agent.log"
+$programDataRoot = $env:PROGRAMDATA
+if ([string]::IsNullOrWhiteSpace($programDataRoot)) {
+  $programDataRoot = "C:\ProgramData"
+}
+$agentLogPrimary = Join-Path $programDataRoot "DaleVision\logs\agent.log"
+$agentLogFallback = Join-Path $installRoot "logs\agent.log"
+$agentLog = $agentLogPrimary
+if (-not (Test-Path $agentLog) -and (Test-Path $agentLogFallback)) {
+  $agentLog = $agentLogFallback
+}
 $updateLog = Join-Path $installRoot "logs\update.log"
 $envPath = Join-Path $installRoot ".env"
 $envVars = Read-EnvFile -Path $envPath
@@ -100,6 +109,9 @@ if ($autoEnabled) {
 }
 Write-Host "Logs:"
 Write-Host "  Agent:  $agentLog"
+if ($agentLog -ne $agentLogPrimary) {
+  Write-Host "  Agent (primary esperado): $agentLogPrimary"
+}
 Write-Host "  Update: $updateLog"
 if (Test-Path $agentLog) {
   Write-Host ""
