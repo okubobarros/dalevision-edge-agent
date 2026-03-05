@@ -7,6 +7,8 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "PD=C:\ProgramData\DaleVision\EdgeAgent\dalevision-edge-agent-windows"
 set "TARGET=%ROOT%"
 if exist "%PD%\scripts\uninstall-service.ps1" set "TARGET=%PD%"
+set "TASK_NAME=DaleVisionEdgeAgent"
+set "UPDATE_TASK_NAME=DaleVisionEdgeAgentUpdate"
 
 echo ==========================================
 echo DALE Vision Edge Agent - Remover Autostart
@@ -20,17 +22,14 @@ echo ROOT=%ROOT%>> "%LOG%"
 echo TARGET=%TARGET%>> "%LOG%"
 echo BAT_PATH=%~f0>> "%LOG%"
 
-set "PS1=%TARGET%\scripts\uninstall-service.ps1"
-set "TASK_NAME=DaleVisionEdgeAgent"
-
-if not exist "%PS1%" goto :missing_script
-
 net session >nul 2>&1
-if %errorlevel%==0 goto :run_admin
+if %errorlevel% neq 0 goto :elevate
+goto :run_admin
 
+:elevate
 echo Solicitando permissao de administrador...
-echo Not admin - elevating PowerShell uninstall...>> "%LOG%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%PS1%"" -TaskName ""%TASK_NAME%""' -Wait"
+echo Not admin - elevating self...>> "%LOG%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%~f0' -Verb RunAs -ArgumentList '--elevated' -WindowStyle Normal -Wait"
 set "EC=%errorlevel%"
 echo ELEVATED_EXIT_CODE=%EC%>> "%LOG%"
 echo.
@@ -44,10 +43,24 @@ echo Log: %LOG%
 pause
 exit /b %EC%
 
- :run_admin
+:run_admin
 echo Running as admin.>> "%LOG%"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -TaskName "%TASK_NAME%" >> "%LOG%" 2>&1
-set "EC=%errorlevel%"
+schtasks /Delete /TN "%TASK_NAME%" /F >> "%LOG%" 2>&1
+set "DEL_MAIN=%errorlevel%"
+echo DELETE_%TASK_NAME%_EXIT=%DEL_MAIN%>> "%LOG%"
+schtasks /Delete /TN "%UPDATE_TASK_NAME%" /F >> "%LOG%" 2>&1
+set "DEL_UPDATE=%errorlevel%"
+echo DELETE_%UPDATE_TASK_NAME%_EXIT=%DEL_UPDATE%>> "%LOG%"
+
+set "EC=0"
+if "%DEL_MAIN%" NEQ "0" (
+  schtasks /Query /TN "%TASK_NAME%" >nul 2>&1
+  if %errorlevel%==0 set "EC=1"
+)
+if "%DEL_UPDATE%" NEQ "0" (
+  schtasks /Query /TN "%UPDATE_TASK_NAME%" >nul 2>&1
+  if %errorlevel%==0 set "EC=1"
+)
 echo UNINSTALL_EXIT_CODE=%EC%>> "%LOG%"
 
 schtasks /Query /TN "DaleVisionEdgeAgent" >nul 2>&1
@@ -70,11 +83,3 @@ type "%LOG%"
 echo.
 pause
 exit /b %EC%
-
-:missing_script
-echo ERRO: script nao encontrado: %PS1%
-echo ERRO: script nao encontrado: %PS1%>> "%LOG%"
-echo.
-echo Log: %LOG%
-pause
-exit /b 2
