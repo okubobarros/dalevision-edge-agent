@@ -41,7 +41,7 @@ if %errorlevel% neq 0 (
   echo Solicitando permissao de administrador...
   echo Not admin - elevating self...>> "%LOG%"
   PowerShell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$p = Start-Process -FilePath '%ComSpec%' -Verb RunAs -ArgumentList '/c """"%~f0"" --elevated""' -WindowStyle Normal -Wait -PassThru; exit $p.ExitCode"
+    "$p = Start-Process -FilePath '%~f0' -Verb RunAs -ArgumentList '--elevated' -WindowStyle Normal -Wait -PassThru; exit $p.ExitCode"
   set "exit_code=%errorlevel%"
   echo ELEVATED_EXIT_CODE=%exit_code%>> "%LOG%"
   echo.
