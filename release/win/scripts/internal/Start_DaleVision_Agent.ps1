@@ -21,6 +21,26 @@ if (-not (Test-Path $exePath)) {
 }
 
 $env:DALE_RUN_MODE = "service"
+
+# Harden runtime environment for Scheduled Task (SYSTEM):
+# - avoid inherited Python vars from host/session
+# - force a writable, stable temp directory for PyInstaller extraction
+foreach ($name in @("PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONEXECUTABLE")) {
+  Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
+}
+
+$tmpDir = Join-Path $installRoot "cache\tmp"
+if (-not (Test-Path $tmpDir)) {
+  New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+}
+$env:TEMP = $tmpDir
+$env:TMP = $tmpDir
+
+Write-Host ("RUN_MODE=" + $env:DALE_RUN_MODE)
+Write-Host ("TEMP=" + $env:TEMP)
+Write-Host ("TMP=" + $env:TMP)
+Write-Host ("USER=" + $env:USERNAME)
+
 Set-Location -Path $installRoot
 
 $oldEap = $ErrorActionPreference
