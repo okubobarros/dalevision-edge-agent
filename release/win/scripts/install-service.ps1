@@ -168,6 +168,13 @@ function Get-UpdateTaskCommand {
   return "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$updateScript`" -InstallDir `"$InstallRoot`""
 }
 
+function Get-CurrentUserId {
+  if (-not [string]::IsNullOrWhiteSpace($env:USERDOMAIN)) {
+    return "$($env:USERDOMAIN)\$($env:USERNAME)"
+  }
+  return $env:USERNAME
+}
+
 function Invoke-InstallService {
   param(
     [string]$InstallDir = $PSScriptRoot,
@@ -181,12 +188,6 @@ function Invoke-InstallService {
   $logDir = Join-Path $installRoot "logs"
   if (-not (Test-Path $logDir)) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
-  }
-  try {
-    & icacls $installRoot /grant "SYSTEM:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T | Out-Null
-    & icacls $logDir /grant "SYSTEM:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T | Out-Null
-  } catch {
-    Write-Log "WARN: falha ao ajustar permissao do logs: $($_.Exception.Message)"
   }
   $script:LogPath = Join-Path $logDir "service_install.ps1.log"
   $installLog = $script:LogPath
@@ -202,14 +203,8 @@ function Invoke-InstallService {
   }
 
   try {
-    $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-      Write-Log "ERRO: permissao insuficiente."
-      Write-Log "Execute este script como Administrador."
-      Write-Log "Pressione Enter para sair."
-      Read-Host | Out-Null
-      exit 1
-    }
+    $currentUser = Get-CurrentUserId
+    Write-Log "RUN_AS_USER=$currentUser"
 
     $agentExeCandidates = Resolve-AgentExePath -InstallDir $installRoot -ScriptRoot $PSScriptRoot
     $agentExe = $agentExeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -297,9 +292,9 @@ function Invoke-InstallService {
     $taskArgs = @(
       "/Create",
       "/F",
-      "/SC", "ONSTART",
-      "/RU", "SYSTEM",
-      "/RL", "HIGHEST",
+      "/SC", "ONLOGON",
+      "/RU", $currentUser,
+      "/RL", "LIMITED",
       "/TN", $TaskName,
       "/TR", $taskCmd
     )
@@ -316,8 +311,8 @@ function Invoke-InstallService {
           throw "run_agent.cmd nao encontrado: $runCmd"
         }
         $action = New-ScheduledTaskAction -Execute $runCmd
-        $trigger = New-ScheduledTaskTrigger -AtStartup
-        $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+        $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
         $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
         $createOutput = (Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-String)
@@ -369,8 +364,8 @@ function Invoke-InstallService {
         "/F",
         "/SC", "HOURLY",
         "/MO", $intervalHours,
-        "/RU", "SYSTEM",
-        "/RL", "HIGHEST",
+        "/RU", $currentUser,
+        "/RL", "LIMITED",
         "/TN", $UpdateTaskName,
         "/TR", $updateCmd
       )

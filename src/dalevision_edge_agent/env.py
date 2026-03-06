@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
 import io
 import logging
 import os
@@ -74,6 +76,27 @@ def _read_env_text(env_path: Path) -> str:
 
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text.lstrip("\ufeff")
+
+
+def describe_env_file(env_path: Path) -> dict:
+    info = {
+        "path": str(env_path),
+        "exists": False,
+        "mtime_utc": None,
+        "size_bytes": None,
+        "sha256": None,
+        "error": None,
+    }
+    try:
+        if env_path.exists():
+            stat = env_path.stat()
+            info["exists"] = True
+            info["size_bytes"] = int(stat.st_size)
+            info["mtime_utc"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+            info["sha256"] = hashlib.sha256(env_path.read_bytes()).hexdigest()
+    except Exception as exc:
+        info["error"] = str(exc)
+    return info
 
 
 def load_env_from_cwd() -> Path:

@@ -31,7 +31,7 @@ from .cameras import (
     send_vision_metrics_event,
 )
 from .diagnostics import run_doctor
-from .env import InvalidTokenError, load_env_from_cwd, load_settings
+from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import run_scan
@@ -787,6 +787,18 @@ def main() -> int:
     args = _parse_args()
     env_path = load_env_from_cwd()
     logger = _setup_logging()
+    env_meta = describe_env_file(env_path)
+    logger.info(
+        "ENV file path=%s cwd=%s exists=%s mtime_utc=%s size_bytes=%s sha256=%s",
+        env_meta.get("path"),
+        Path.cwd(),
+        env_meta.get("exists"),
+        env_meta.get("mtime_utc"),
+        env_meta.get("size_bytes"),
+        env_meta.get("sha256"),
+    )
+    if env_meta.get("error"):
+        logger.warning("ENV file metadata error: %s", env_meta.get("error"))
 
     if len(sys.argv) == 1:
         while True:

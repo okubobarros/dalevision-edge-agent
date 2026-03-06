@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
@@ -11,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from ..cameras import build_auth_headers, fetch_roi
+from ..cameras import _ffmpeg_path, build_auth_headers, fetch_roi, mask_rtsp_url
 from .geometry import line_side, point_in_polygon
 from .roi_yaml import load_roi_yaml
 from .sources.video import VideoFrameSource
@@ -31,6 +33,15 @@ def _iso(ts: float) -> str:
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _redact_rtsp_secrets(text: str, rtsp_url: str) -> str:
+    if not text:
+        return ""
+    safe_url = mask_rtsp_url(rtsp_url)
+    redacted = text.replace(rtsp_url, safe_url)
+    redacted = re.sub(r"(rtsp://[^\\s/@]+:)[^@\\s]+@", r"\\1***@", redacted)
+    return redacted
 
 
 def _safe_json_load(raw: str) -> dict:
@@ -638,6 +649,7 @@ class VisionWorker:
         if not rtsp_url:
             self.logger.info("[VISION] rtsp attempt camera_id=%s ok=0 elapsed_ms=0 reason=rtsp_url_missing", camera_id)
             return None
+        rtsp_url = str(rtsp_url)
         started = time.perf_counter()
         try:
             import cv2
@@ -645,6 +657,7 @@ class VisionWorker:
             if not cap.isOpened():
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
                 self.logger.info("[VISION] rtsp attempt camera_id=%s ok=0 elapsed_ms=%s reason=open_failed", camera_id, elapsed_ms)
+                self._log_ffmpeg_open_failed(camera_id=camera_id, rtsp_url=rtsp_url)
                 return None
             ok, frame = cap.read()
             cap.release()
@@ -664,6 +677,72 @@ class VisionWorker:
                 exc,
             )
             return None
+
+    def _log_ffmpeg_open_failed(self, *, camera_id: str, rtsp_url: str) -> None:
+        ffmpeg_path = _ffmpeg_path()
+        if not ffmpeg_path:
+            self.logger.info("[VISION] rtsp open_failed ffmpeg_not_found camera_id=%s", camera_id)
+            return
+        transport = _env_str("VISION_RTSP_TRANSPORT", "tcp").strip() or "tcp"
+        try:
+            timeout_seconds = int(_env_str("VISION_RTSP_DIAG_TIMEOUT_SECONDS", "8"))
+        except Exception:
+            timeout_seconds = 8
+        timeout_seconds = max(3, timeout_seconds)
+        stimeout_us = timeout_seconds * 1_000_000
+        cmd = [
+            ffmpeg_path,
+            "-hide_banner",
+            "-nostdin",
+            "-rtsp_transport",
+            transport,
+            "-stimeout",
+            str(stimeout_us),
+            "-i",
+            rtsp_url,
+            "-t",
+            "1",
+            "-f",
+            "null",
+            "-",
+        ]
+        safe_cmd = cmd.copy()
+        safe_cmd[safe_cmd.index(rtsp_url)] = mask_rtsp_url(rtsp_url)
+        self.logger.info(
+            "[VISION] rtsp open_failed ffmpeg_cmd camera_id=%s cmd=%s",
+            camera_id,
+            subprocess.list2cmdline(safe_cmd),
+        )
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_seconds)
+        except subprocess.TimeoutExpired as exc:
+            stderr = _redact_rtsp_secrets((exc.stderr or "").strip(), rtsp_url)
+            self.logger.info(
+                "[VISION] rtsp open_failed ffmpeg timeout camera_id=%s timeout_s=%s",
+                camera_id,
+                timeout_seconds,
+            )
+            if stderr:
+                self.logger.info(
+                    "[VISION] rtsp open_failed ffmpeg stderr camera_id=%s\n%s",
+                    camera_id,
+                    stderr,
+                )
+            return
+        stderr = _redact_rtsp_secrets((result.stderr or "").strip(), rtsp_url)
+        if stderr:
+            self.logger.info(
+                "[VISION] rtsp open_failed ffmpeg stderr camera_id=%s exit_code=%s\n%s",
+                camera_id,
+                result.returncode,
+                stderr,
+            )
+        else:
+            self.logger.info(
+                "[VISION] rtsp open_failed ffmpeg stderr camera_id=%s exit_code=%s <empty>",
+                camera_id,
+                result.returncode,
+            )
 
     def _process_frame(self, state: dict, cam: dict, frame, ts: float) -> Optional[dict]:
         role = state["role"]

@@ -11,18 +11,17 @@ PASSO 2: TESTE RAPIDO
 4) Para parar, feche a janela do teste rapido.
 
 PASSO 3: INSTALAR AUTOSTART
-1) Execute 02_INSTALAR_AUTOSTART.bat (precisa admin).
-2) A tarefa roda como SYSTEM, em janela oculta.
-3) O instalador copia automaticamente para C:\ProgramData\DaleVision\EdgeAgent
-3) Se o Windows bloqueou o download, o instalador ja desbloqueia automaticamente.
-4) Pelo menu do agente (opcao 3), sem admin o sistema cria fallback no Startup do usuario.
+1) Execute 02_INSTALAR_AUTOSTART.bat (nao precisa admin).
+2) A tarefa roda no login do usuario (ONLOGON) e usa a mesma pasta do ZIP.
+3) O .env lido e o da pasta extraida (onde voce editou).
+4) Se o Windows bloqueou o download, o instalador ja desbloqueia automaticamente.
 
 PASSO 4: VERIFICAR STATUS
 1) Execute 03_VERIFICAR_STATUS.bat.
 2) Veja o status da tarefa e as ultimas linhas do log.
 
 PASSO 5: REMOVER AUTOSTART
-1) Execute 04_REMOVER_AUTOSTART.bat (precisa admin).
+1) Execute 04_REMOVER_AUTOSTART.bat.
 
 IMPORTANTE
 - Nao clique em arquivos .ps1 dentro de scripts\.
@@ -61,7 +60,6 @@ SE O WINDOWS BLOQUEAR O ARQUIVO (DOWNLOAD)
 TESTE MANUAL (INSTALL-SERVICE + FALLBACK)
 1) Extraia o ZIP em uma pasta local.
 2) Rode `dalevision-edge-agent.exe` e escolha opcao 3.
-3) Com Admin: validar criacao das tarefas `DaleVisionEdgeAgent` e `DaleVisionEdgeAgentUpdate`.
-4) Sem Admin: validar mensagem de fallback e arquivo `DaleVision Edge Agent.lnk` em:
-   `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`.
+3) Validar criacao das tarefas `DaleVisionEdgeAgent` e `DaleVisionEdgeAgentUpdate` (quando auto-update estiver ativo).
+4) Validar que a tarefa aponta para a pasta extraida (mesmo local do .env).
 5) Validar que o app nao fecha apos erro de script ausente; o menu deve continuar ativo.

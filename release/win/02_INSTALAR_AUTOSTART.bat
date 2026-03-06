@@ -26,30 +26,8 @@ if exist "%PS1%" (
   echo PS1_EXISTS=false>> "%LOG%"
 )
 
-REM --- Elevation check ---
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-  echo Not admin - elevating self...>> "%LOG%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Start-Process -FilePath '%ComSpec%' -ArgumentList '/c """"%~f0""""' -Verb RunAs -WindowStyle Normal -Wait"
-  exit /b
-)
-
-REM --- Ensure install location in ProgramData (SYSTEM can write) ---
-set "TARGET_BASE=C:\ProgramData\DaleVision\EdgeAgent"
-set "TARGET=%TARGET_BASE%\dalevision-edge-agent-windows"
-if /I not "%ROOT%"=="%TARGET%" (
-  echo Copying to %TARGET% ...>> "%LOG%"
-  if not exist "%TARGET_BASE%" mkdir "%TARGET_BASE%" >nul 2>&1
-  robocopy "%ROOT%" "%TARGET%" /E /COPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NC /NS >> "%LOG%" 2>&1
-  echo Relaunching from %TARGET%>> "%LOG%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "Start-Process -FilePath '%ComSpec%' -ArgumentList '/c """"%TARGET%\02_INSTALAR_AUTOSTART.bat""""' -Verb RunAs -WindowStyle Normal -Wait"
-  exit /b
-)
-
 set "PS=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-echo Running as admin.>> "%LOG%"
+echo Installing autostart for current user (ONLOGON).>> "%LOG%"
 echo PS=%PS%>> "%LOG%"
 echo PS1=%PS1%>> "%LOG%"
 

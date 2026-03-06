@@ -24,6 +24,19 @@ if not exist "%PS1%" (
   exit /b 3
 )
 
+for /f "usebackq delims=" %%A in (`"%PS%" -NoProfile -Command ^
+  "$root = '%ROOT%\\dalevision-edge-agent.exe'; " ^
+  "$root = [IO.Path]::GetFullPath($root).ToLowerInvariant(); " ^
+  "Get-Process -Name 'dalevision-edge-agent' -ErrorAction SilentlyContinue | Where-Object { " ^
+  "  $_.Path -and ([IO.Path]::GetFullPath($_.Path).ToLowerInvariant() -eq $root) " ^
+  "} | Select-Object -ExpandProperty Id"`) do (
+  set "PID=%%A"
+)
+if defined PID (
+  echo AGENT_ALREADY_RUNNING PID=%PID%>> "%LOG%"
+  exit /b 0
+)
+
 "%PS%" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%PS1%" -InstallDir "%ROOT%" >> "%LOG%" 2>&1
 set "EC=%errorlevel%"
 echo EXIT_CODE=%EC%>> "%LOG%"

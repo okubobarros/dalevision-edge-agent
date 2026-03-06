@@ -8,6 +8,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $releaseRoot = Join-Path $repoRoot "release"
 $releaseWin = Join-Path $releaseRoot "win"
 $distExe = Join-Path $repoRoot "dist\dalevision-edge-agent.exe"
+$modelPath = Join-Path $repoRoot "yolov8n.pt"
 $envTemplatePath = Join-Path $releaseRoot ".env.template"
 $buildInfoPath = Join-Path $releaseWin "BUILD_INFO.txt"
 
@@ -25,6 +26,7 @@ function Assert-FileExists {
 # 1) validar fontes obrigatorias
 $requiredSources = @(
   @{ Path = $distExe; Label = "dalevision-edge-agent.exe (dist)" },
+  @{ Path = $modelPath; Label = "yolov8n.pt" },
   @{ Path = $envTemplatePath; Label = ".env.template" },
   @{ Path = (Join-Path $releaseRoot "README.txt"); Label = "README.txt" },
   @{ Path = (Join-Path $releaseRoot "01_TESTE_RAPIDO.bat"); Label = "01_TESTE_RAPIDO.bat" },
@@ -52,6 +54,7 @@ New-Item -ItemType Directory -Path $releaseWin | Out-Null
 
 # 3) copiar artefatos obrigatorios (SSOT: pasta release/)
 Copy-Item $distExe (Join-Path $releaseWin "dalevision-edge-agent.exe") -Force
+Copy-Item $modelPath (Join-Path $releaseWin "yolov8n.pt") -Force
 Copy-Item (Join-Path $releaseRoot "README.txt") (Join-Path $releaseWin "README.txt") -Force
 Copy-Item (Join-Path $releaseRoot "01_TESTE_RAPIDO.bat") (Join-Path $releaseWin "01_TESTE_RAPIDO.bat") -Force
 Copy-Item (Join-Path $releaseRoot "02_INSTALAR_AUTOSTART.bat") (Join-Path $releaseWin "02_INSTALAR_AUTOSTART.bat") -Force
@@ -119,6 +122,7 @@ Write-Host "SHA256 scripts/install-service.ps1: $((Get-FileHash -Algorithm SHA25
 
 $required = @(
   "dalevision-edge-agent.exe",
+  "yolov8n.pt",
   ".env",
   "01_TESTE_RAPIDO.bat",
   "02_INSTALAR_AUTOSTART.bat",
@@ -157,8 +161,6 @@ $forbiddenPatterns = @(
   "*.avi",
   "*.mov",
   "*.mkv",
-  "yolov8*.pt",
-  "*.pt",
   "*.log"
 )
 $forbiddenFound = @()
@@ -192,8 +194,6 @@ $forbiddenZipPatterns = @(
   "^configs/",
   "^edge-agent/config/rois/.*\\.yaml$",
   "\\.(mp4|avi|mov|mkv)$",
-  "^yolov8.*\\.pt$",
-  "\\.pt$",
   "\\.log$"
 )
 $foundForbiddenZip = @()
