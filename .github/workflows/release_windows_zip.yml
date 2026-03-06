@@ -11,6 +11,8 @@ permissions:
 jobs:
   build-release:
     runs-on: windows-latest
+    env:
+      DALE_VISION_MODEL_URL: https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt
     steps:
       - name: Checkout
         uses: actions/checkout@v4
