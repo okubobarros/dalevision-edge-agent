@@ -225,6 +225,7 @@ function Invoke-InstallService {
       } else {
         Write-Log "Pasta nao encontrada: $installRoot"
       }
+      Write-Log "ATENCAO: esta janela aguarda Enter para sair."
       Write-Log "Pressione Enter para sair."
       Read-Host | Out-Null
       exit 1
@@ -325,6 +326,19 @@ function Invoke-InstallService {
     } catch {
       $createCode = 1
       $createOutput = $_.Exception.ToString()
+      $errorText = $_.Exception.Message
+      if ($errorText -match "Acesso negado|Access is denied") {
+        Write-Log "PERMISSION_DENIED: falha ao criar task via ScheduledTasks. Tentando fallback com schtasks.exe."
+        try {
+          $createResult = Invoke-Schtasks -SchtasksArgs $taskArgs
+          $createCode = $createResult.Code
+          $createOutput = ($createResult.Output | Out-String)
+        } catch {
+          $createCode = 1
+          $createOutput = $_.Exception.ToString()
+          Write-Log "PERMISSION_HINT: se a task existir com outro usuario, delete com admin: schtasks /Delete /TN `"$TaskName`" /F"
+        }
+      }
     }
 
     Write-Log ("CREATE_EXITCODE=" + $createCode)
@@ -381,6 +395,7 @@ function Invoke-InstallService {
     Write-Log "Para checar status: schtasks /Query /TN `"$TaskName`" /V /FO LIST"
   } catch {
     Write-Log "ERRO: $($_.Exception.Message)"
+    Write-Log "ATENCAO: esta janela aguarda Enter para sair."
     Write-Log "Pressione Enter para sair."
     Read-Host | Out-Null
     exit 1

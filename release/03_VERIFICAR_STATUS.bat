@@ -5,7 +5,9 @@ set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 
 set "PD=C:\ProgramData\DaleVision\EdgeAgent\dalevision-edge-agent-windows"
-if exist "%PD%\scripts\verify-service.ps1" (
+if exist "%ROOT%\scripts\verify-service.ps1" (
+  set "TARGET=%ROOT%"
+) else if exist "%PD%\scripts\verify-service.ps1" (
   set "TARGET=%PD%"
 ) else (
   set "TARGET=%ROOT%"

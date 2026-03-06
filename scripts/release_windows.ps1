@@ -1,5 +1,6 @@
 param(
-  [string]$Version = "v0.2.1"
+  [string]$Version = "v0.2.1",
+  [string]$ModelUrl = $env:DALE_VISION_MODEL_URL
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +13,10 @@ $modelPath = Join-Path $repoRoot "yolov8n.pt"
 $envTemplatePath = Join-Path $releaseRoot ".env.template"
 $buildInfoPath = Join-Path $releaseWin "BUILD_INFO.txt"
 
+if ([string]::IsNullOrWhiteSpace($ModelUrl)) {
+  $ModelUrl = "https://github.com/ultralytics/assets/releases/download/v8.0.0/yolov8n.pt"
+}
+
 function Assert-FileExists {
   param(
     [string]$Path,
@@ -22,6 +27,29 @@ function Assert-FileExists {
     throw "Missing required source file: $Label ($Path)"
   }
 }
+
+function Ensure-Model {
+  param(
+    [string]$Path,
+    [string]$Url
+  )
+
+  if (Test-Path $Path) {
+    return
+  }
+
+  Write-Host "Modelo nao encontrado. Baixando yolov8n.pt..."
+  Write-Host "MODEL_URL=$Url"
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -Uri $Url -OutFile $Path
+  } catch {
+    throw "Falha ao baixar yolov8n.pt. Defina DALE_VISION_MODEL_URL ou coloque o arquivo em $Path. Detalhes: $($_.Exception.Message)"
+  }
+}
+
+# 0) garantir modelo
+Ensure-Model -Path $modelPath -Url $ModelUrl
 
 # 1) validar fontes obrigatorias
 $requiredSources = @(
@@ -175,15 +203,33 @@ if ($forbiddenFound.Count -gt 0) {
 # 6) zipar
 $zipName = Join-Path $repoRoot "dalevision-edge-agent-windows.zip"
 Remove-Item $zipName -Force -ErrorAction SilentlyContinue
-Compress-Archive -Path (Join-Path $releaseWin "*") -DestinationPath $zipName
+$zipPaths = @(
+  (Join-Path $releaseWin "*")
+)
+Compress-Archive -Path $zipPaths -DestinationPath $zipName
 
-# 7) sanity check do ZIP
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = [System.IO.Compression.ZipFile]::OpenRead($zipName)
-$names = $zip.Entries | ForEach-Object { $_.FullName }
-$zip.Dispose()
+# 7) sanity check do ZIP (via extração temporária)
+$zipCheckDir = Join-Path $repoRoot "_zip_check"
+Remove-Item -Recurse -Force $zipCheckDir -ErrorAction SilentlyContinue
+Expand-Archive -Path $zipName -DestinationPath $zipCheckDir -Force
+$names = Get-ChildItem -Path $zipCheckDir -Recurse -File | ForEach-Object {
+  $_.FullName.Substring($zipCheckDir.Length + 1).Replace("\", "/")
+}
+Remove-Item -Recurse -Force $zipCheckDir -ErrorAction SilentlyContinue
 
-$missingZip = $required | Where-Object { $names -notcontains $_ }
+$missingZip = @()
+foreach ($req in $required) {
+  $found = $false
+  foreach ($name in $names) {
+    if ($name -ieq $req -or $name -imatch ([regex]::Escape($req) + "$")) {
+      $found = $true
+      break
+    }
+  }
+  if (-not $found) {
+    $missingZip += $req
+  }
+}
 if ($missingZip.Count -gt 0) {
   throw "Missing required files in ZIP: $($missingZip -join ', ')"
 }
