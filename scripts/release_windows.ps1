@@ -14,7 +14,7 @@ $envTemplatePath = Join-Path $releaseRoot ".env.template"
 $buildInfoPath = Join-Path $releaseWin "BUILD_INFO.txt"
 
 if ([string]::IsNullOrWhiteSpace($ModelUrl)) {
-  $ModelUrl = "https://github.com/ultralytics/assets/releases/download/v8.0.0/yolov8n.pt"
+  $ModelUrl = ""
 }
 
 function Assert-FileExists {
@@ -38,14 +38,35 @@ function Ensure-Model {
     return
   }
 
-  Write-Host "Modelo nao encontrado. Baixando yolov8n.pt..."
-  Write-Host "MODEL_URL=$Url"
-  try {
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $Url -OutFile $Path
-  } catch {
-    throw "Falha ao baixar yolov8n.pt. Defina DALE_VISION_MODEL_URL ou coloque o arquivo em $Path. Detalhes: $($_.Exception.Message)"
+  $urls = @()
+  if (-not [string]::IsNullOrWhiteSpace($Url)) {
+    $urls += $Url
+  } else {
+    $urls += @(
+      "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt",
+      "https://github.com/ultralytics/assets/releases/download/v8.2.0/yolov8n.pt",
+      "https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt"
+    )
   }
+
+  Write-Host "Modelo nao encontrado. Baixando yolov8n.pt..."
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+  $lastError = ""
+  foreach ($candidate in $urls) {
+    try {
+      Write-Host "MODEL_URL=$candidate"
+      Invoke-WebRequest -Uri $candidate -OutFile $Path
+      if (Test-Path $Path) {
+        return
+      }
+    } catch {
+      $lastError = $_.Exception.Message
+      Write-Host "Falha ao baixar de $candidate. Detalhes: $lastError"
+    }
+  }
+
+  throw "Falha ao baixar yolov8n.pt. Defina DALE_VISION_MODEL_URL ou coloque o arquivo em $Path. Ultimo erro: $lastError"
 }
 
 # 0) garantir modelo
