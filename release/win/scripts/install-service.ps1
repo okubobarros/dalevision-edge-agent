@@ -3,6 +3,7 @@ param(
   [string]$TaskName = "DaleVisionEdgeAgent",
   [string]$StartupTaskName = "DaleVisionEdgeAgentStartup",
   [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate",
+  [switch]$EnableStartupTask,
   [switch]$WhatIf
 )
 
@@ -176,12 +177,34 @@ function Get-CurrentUserId {
   return $env:USERNAME
 }
 
+function Get-StartupTaskEnabled {
+  param(
+    [hashtable]$EnvVars,
+    [bool]$ExplicitEnable
+  )
+
+  if ($ExplicitEnable) {
+    return $true
+  }
+
+  foreach ($key in @("STARTUP_TASK_ENABLED", "EDGE_STARTUP_TASK_ENABLED")) {
+    $raw = $EnvVars[$key]
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      continue
+    }
+    return ($raw.Trim() -eq "1")
+  }
+
+  return $false
+}
+
 function Invoke-InstallService {
   param(
     [string]$InstallDir = $PSScriptRoot,
     [string]$TaskName = "DaleVisionEdgeAgent",
     [string]$StartupTaskName = "DaleVisionEdgeAgentStartup",
     [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate",
+    [switch]$EnableStartupTask,
     [switch]$WhatIf
   )
 
@@ -245,11 +268,16 @@ function Invoke-InstallService {
     Write-Log "SCHTASKS_PATH=$script:schtasksExe"
     Write-Log "EXISTS_schtasks=$(Test-Path $script:schtasksExe)"
 
+    $envPath = Join-Path $installRoot ".env"
+    $envVars = Read-EnvFile -Path $envPath
+    $startupTaskEnabled = Get-StartupTaskEnabled -EnvVars $envVars -ExplicitEnable:$EnableStartupTask
+
     $installInfo = @(
       "installRoot=$installRoot",
       "exeResolved=$agentExe",
       "taskName=$TaskName",
       "startupTaskName=$StartupTaskName",
+      "startupTaskEnabled=$startupTaskEnabled",
       "command=$taskCmd"
     )
     foreach ($line in $installInfo) {
@@ -302,16 +330,6 @@ function Invoke-InstallService {
       "/TN", $TaskName,
       "/TR", $taskCmd
     )
-    $startupTaskArgs = @(
-      "/Create",
-      "/F",
-      "/SC", "ONSTART",
-      "/RU", "SYSTEM",
-      "/RL", "HIGHEST",
-      "/TN", $StartupTaskName,
-      "/TR", $taskCmd
-    )
-
     $runCmd = Join-Path $installRoot "run_agent.cmd"
     if (-not (Test-Path $runCmd)) {
       throw "run_agent.cmd nao encontrado: $runCmd"
@@ -328,28 +346,50 @@ function Invoke-InstallService {
         $usedScheduledTasks = $true
         $action = New-ScheduledTaskAction -Execute $runCmd
         $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
-        $startupTrigger = New-ScheduledTaskTrigger -AtStartup
         $logonPrincipal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-        $startupPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
         $logonTask = New-ScheduledTask -Action $action -Trigger $logonTrigger -Principal $logonPrincipal -Settings $settings
-        $startupTask = New-ScheduledTask -Action $action -Trigger $startupTrigger -Principal $startupPrincipal -Settings $settings
         $createOutput = (Register-ScheduledTask -TaskName $TaskName -InputObject $logonTask -Force | Out-String)
-        $startupCreateOutput = (Register-ScheduledTask -TaskName $StartupTaskName -InputObject $startupTask -Force | Out-String)
+        if ($startupTaskEnabled) {
+          $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+          $startupPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+          $startupTask = New-ScheduledTask -Action $action -Trigger $startupTrigger -Principal $startupPrincipal -Settings $settings
+          $startupCreateOutput = (Register-ScheduledTask -TaskName $StartupTaskName -InputObject $startupTask -Force | Out-String)
+        } else {
+          $startupCreateOutput = "SKIPPED startup task disabled"
+        }
       } else {
         $createOutput = "ScheduledTasks module not available. Falling back to schtasks."
         $createResult = Invoke-Schtasks -SchtasksArgs $taskArgs
         $createCode = $createResult.Code
         $createOutput = ($createOutput + "`n" + ($createResult.Output | Out-String))
-        $startupCreateResult = Invoke-Schtasks -SchtasksArgs $startupTaskArgs
-        $startupCreateCode = $startupCreateResult.Code
-        $startupCreateOutput = ($startupCreateResult.Output | Out-String)
+        if ($startupTaskEnabled) {
+          $startupTaskArgs = @(
+            "/Create",
+            "/F",
+            "/SC", "ONSTART",
+            "/RU", "SYSTEM",
+            "/RL", "HIGHEST",
+            "/TN", $StartupTaskName,
+            "/TR", $taskCmd
+          )
+          $startupCreateResult = Invoke-Schtasks -SchtasksArgs $startupTaskArgs
+          $startupCreateCode = $startupCreateResult.Code
+          $startupCreateOutput = ($startupCreateResult.Output | Out-String)
+        } else {
+          $startupCreateOutput = "SKIPPED startup task disabled"
+        }
       }
     } catch {
       $createCode = 1
-      $startupCreateCode = 1
+      $startupCreateCode = 0
       $createOutput = $_.Exception.ToString()
-      $startupCreateOutput = $_.Exception.ToString()
+      if ($startupTaskEnabled) {
+        $startupCreateCode = 1
+        $startupCreateOutput = $_.Exception.ToString()
+      } else {
+        $startupCreateOutput = "SKIPPED startup task disabled"
+      }
       $errorText = $_.Exception.Message
       if ($errorText -match "Acesso negado|Access is denied") {
         Write-Log "PERMISSION_DENIED: falha ao criar task via ScheduledTasks. Tentando fallback com schtasks.exe."
@@ -357,14 +397,31 @@ function Invoke-InstallService {
           $createResult = Invoke-Schtasks -SchtasksArgs $taskArgs
           $createCode = $createResult.Code
           $createOutput = ($createResult.Output | Out-String)
-          $startupCreateResult = Invoke-Schtasks -SchtasksArgs $startupTaskArgs
-          $startupCreateCode = $startupCreateResult.Code
-          $startupCreateOutput = ($startupCreateResult.Output | Out-String)
+          if ($startupTaskEnabled) {
+            $startupTaskArgs = @(
+              "/Create",
+              "/F",
+              "/SC", "ONSTART",
+              "/RU", "SYSTEM",
+              "/RL", "HIGHEST",
+              "/TN", $StartupTaskName,
+              "/TR", $taskCmd
+            )
+            $startupCreateResult = Invoke-Schtasks -SchtasksArgs $startupTaskArgs
+            $startupCreateCode = $startupCreateResult.Code
+            $startupCreateOutput = ($startupCreateResult.Output | Out-String)
+          } else {
+            $startupCreateOutput = "SKIPPED startup task disabled"
+          }
         } catch {
           $createCode = 1
-          $startupCreateCode = 1
+          if ($startupTaskEnabled) { $startupCreateCode = 1 }
           $createOutput = $_.Exception.ToString()
-          $startupCreateOutput = $_.Exception.ToString()
+          if ($startupTaskEnabled) {
+            $startupCreateOutput = $_.Exception.ToString()
+          } else {
+            $startupCreateOutput = "SKIPPED startup task disabled"
+          }
           Write-Log "PERMISSION_HINT: se a task existir com outro usuario, delete com admin: schtasks /Delete /TN `"$TaskName`" /F"
         }
       }
@@ -374,7 +431,7 @@ function Invoke-InstallService {
     Write-Log ("CREATE_OUTPUT=" + (($createOutput | Out-String).Trim()))
     Write-Log ("STARTUP_CREATE_EXITCODE=" + $startupCreateCode)
     Write-Log ("STARTUP_CREATE_OUTPUT=" + (($startupCreateOutput | Out-String).Trim()))
-    if ($createCode -ne 0 -or $startupCreateCode -ne 0) {
+    if ($createCode -ne 0 -or ($startupTaskEnabled -and $startupCreateCode -ne 0)) {
       throw "Falha ao criar as tarefas agendadas. logon=$createCode startup=$startupCreateCode"
     }
 
@@ -385,19 +442,21 @@ function Invoke-InstallService {
         Write-Log ("TASK_ACTION=" + $actionObj.Execute)
         Write-Log ("TASK_ARGUMENT=" + $actionObj.Arguments)
       }
-      $startupTaskObj = Get-ScheduledTask -TaskName $StartupTaskName -ErrorAction Stop
-      $startupActionObj = $startupTaskObj.Actions | Select-Object -First 1
-      if ($startupActionObj) {
-        Write-Log ("STARTUP_TASK_ACTION=" + $startupActionObj.Execute)
-        Write-Log ("STARTUP_TASK_ARGUMENT=" + $startupActionObj.Arguments)
+      if ($startupTaskEnabled) {
+        $startupTaskObj = Get-ScheduledTask -TaskName $StartupTaskName -ErrorAction Stop
+        $startupActionObj = $startupTaskObj.Actions | Select-Object -First 1
+        if ($startupActionObj) {
+          Write-Log ("STARTUP_TASK_ACTION=" + $startupActionObj.Execute)
+          Write-Log ("STARTUP_TASK_ARGUMENT=" + $startupActionObj.Arguments)
+        }
+      } else {
+        Write-Log "STARTUP_TASK=DISABLED"
       }
     } catch {
       throw "Tarefa nao encontrada apos criacao. Detalhes: $($_.Exception.Message)"
     }
 
     $updateScript = Join-Path $installRoot "scripts\update.ps1"
-    $envPath = Join-Path $installRoot ".env"
-    $envVars = Read-EnvFile -Path $envPath
     $autoEnabled = ($envVars["AUTO_UPDATE_ENABLED"] -eq "1")
     $repo = $envVars["UPDATE_GITHUB_REPO"]
 
