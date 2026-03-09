@@ -44,6 +44,9 @@ VISION_THUMBNAIL_WIDTH=320
 Observações:
 - `VISION_EMBED_THUMBNAIL=1` envia thumbnail blur (base64) no payload do alerta.
 - Sem OpenCV/YOLO, o worker degrada com logs e segue sem bloquear o agente.
+- ROI remoto v2 aceita `zones + lines + ownership`.
+- Para `entry_exit`, a linha e direcional: a ordem dos dois pontos define o sentido de `entry` vs `exit`.
+- O payload `vision.metrics.v1` carrega `zone_id`, `roi_entity_id`, `metric_type` e `ownership.mode=single_camera_owner`.
 
 ## Replay Mode (dev only)
 Use MP4 local como fonte para validar ROI e métricas antes de ir para a loja.

@@ -248,6 +248,8 @@ class VisionWorker:
             "agg": self._fresh_agg(),
             "track_line_side_state": {},
             "track_line_last_event": {},
+            "room_track_enter_ts": {},
+            "room_track_last_seen_ts": {},
             "checkout_cycle": {"in_cycle": False, "interaction_start": None, "last_checkout": -1e9},
             "model": None,
             "idle_start_ts": None,
@@ -263,11 +265,13 @@ class VisionWorker:
             "frames_processed_for_detection": 0,
             "frames_with_detections": 0,
             "detections_sum": 0,
-            "line_crossings_count": None,
+            "line_crossings_count": 0,
             "fila_sum": 0,
             "fila_max": 0,
             "consumo_sum": 0,
             "consumo_max": 0,
+            "consumo_dwell_sum": 0,
+            "consumo_dwell_samples": 0,
             "entries": 0,
             "exits": 0,
             "checkout_events": 0,
@@ -750,7 +754,7 @@ class VisionWorker:
         agg["frames"] += 1
 
         stride = max(1, int(self.cfg.frame_stride))
-        if agg["frames"] % stride != 1:
+        if (agg["frames"] - 1) % stride != 0:
             return None
 
         agg["frames_processed_for_detection"] += 1
@@ -758,25 +762,28 @@ class VisionWorker:
         if roi is None:
             return None
 
+        state["last_roi_context"] = roi
         zones = roi["zones"]
         lines = roi["lines"]
         state["roi_lines_count"] = len(lines)
 
-        # MVP usa 1 frame por tick (RTSP ou snapshot).
-        # Evoluir para tracking RTSP low-FPS para fluxo/checkout completo.
-        import cv2
-        h, w = frame.shape[:2]
         results = self._yolo_track(state, frame)
         fila_count = 0
         consumo_count = 0
         clients_at_pay = 0
         staff_at_cashier = 0
+        consumo_dwell_seconds = 0
 
         phone_in_staff_zone = False
         people_detections = 0
+        active_room_tracks = set()
         if results and results.get("boxes"):
             for item in results["boxes"]:
-                x1, y1, x2, y2, cls = item
+                if len(item) >= 6:
+                    x1, y1, x2, y2, cls, track_id = item
+                else:
+                    x1, y1, x2, y2, cls = item
+                    track_id = None
                 is_person = cls == 0
                 is_phone = cls == self.cfg.phone_class_id
                 if not is_person and not is_phone:
@@ -809,9 +816,76 @@ class VisionWorker:
                         continue
                     if "area_consumo" in zones and point_in_polygon(cx, foot_y, zones["area_consumo"]):
                         consumo_count += 1
+                        if track_id is not None:
+                            room_enter_ts = state["room_track_enter_ts"]
+                            room_last_seen_ts = state["room_track_last_seen_ts"]
+                            if track_id not in room_enter_ts:
+                                room_enter_ts[track_id] = ts
+                            room_last_seen_ts[track_id] = ts
+                            active_room_tracks.add(track_id)
                 elif role == "entrada":
-                    # Snapshot-only cannot infer flow accurately.
-                    pass
+                    if not is_person or track_id is None:
+                        continue
+                    track_state = state["track_line_side_state"].setdefault(track_id, {})
+                    track_events = state["track_line_last_event"].setdefault(track_id, {})
+                    line_meta = (roi.get("line_meta") or {}) if isinstance(roi, dict) else {}
+                    for line_name, pts in lines.items():
+                        p1, p2 = pts
+                        side = line_side(tuple(p1), tuple(p2), (cx, foot_y))
+                        prev = track_state.get(line_name)
+                        if prev is not None:
+                            crossed_entry = prev < 0 <= side
+                            crossed_exit = prev > 0 >= side
+                            if crossed_entry:
+                                key = f"entry:{line_name}"
+                                last_t = float(track_events.get(key, -1e9))
+                                if (ts - last_t) >= 4.0:
+                                    agg["entries"] += 1
+                                    agg["line_crossings_count"] += 1
+                                    track_events[key] = ts
+                                    self._send_crossing_event(
+                                        cam=cam,
+                                        line_name=line_name,
+                                        line_meta=line_meta.get(line_name) or {},
+                                        direction="entry",
+                                        ts=ts,
+                                        track_id=track_id,
+                                    )
+                            elif crossed_exit:
+                                key = f"exit:{line_name}"
+                                last_t = float(track_events.get(key, -1e9))
+                                if (ts - last_t) >= 4.0:
+                                    agg["exits"] += 1
+                                    agg["line_crossings_count"] += 1
+                                    track_events[key] = ts
+                                    self._send_crossing_event(
+                                        cam=cam,
+                                        line_name=line_name,
+                                        line_meta=line_meta.get(line_name) or {},
+                                        direction="exit",
+                                        ts=ts,
+                                        track_id=track_id,
+                                    )
+                        track_state[line_name] = side
+
+        if role == "salao":
+            room_enter_ts = state.get("room_track_enter_ts") or {}
+            room_last_seen_ts = state.get("room_track_last_seen_ts") or {}
+            dwell_values = []
+            for track_id in active_room_tracks:
+                enter_ts = float(room_enter_ts.get(track_id) or ts)
+                dwell_values.append(max(0, int(round(ts - enter_ts))))
+            consumo_dwell_seconds = int(round(sum(dwell_values) / len(dwell_values))) if dwell_values else 0
+
+            stale_after_seconds = max(10, int(self.cfg.poll_seconds) * 3)
+            stale_track_ids = [
+                track_id
+                for track_id, last_seen in room_last_seen_ts.items()
+                if (ts - float(last_seen or ts)) >= stale_after_seconds
+            ]
+            for track_id in stale_track_ids:
+                room_enter_ts.pop(track_id, None)
+                room_last_seen_ts.pop(track_id, None)
 
         agg = state["agg"]
         agg["detections_sum"] += people_detections
@@ -829,9 +903,34 @@ class VisionWorker:
             agg["fila_sum"] += fila_count
             agg["fila_max"] = max(agg["fila_max"], fila_count)
             agg["staff_active_est"] = max(agg["staff_active_est"], staff_at_cashier)
+            self._send_queue_state_event(
+                cam=cam,
+                roi=roi,
+                queue_length=fila_count,
+                staff_active_est=staff_at_cashier,
+                ts=ts,
+            )
+            self._track_checkout_cycle(
+                state=state,
+                cam=cam,
+                roi=roi,
+                clients_at_pay=clients_at_pay,
+                staff_active=staff_at_cashier,
+                ts=ts,
+            )
         if role == "salao":
             agg["consumo_sum"] += consumo_count
             agg["consumo_max"] = max(agg["consumo_max"], consumo_count)
+            if consumo_dwell_seconds > 0:
+                agg["consumo_dwell_sum"] += consumo_dwell_seconds
+                agg["consumo_dwell_samples"] += 1
+            self._send_zone_occupancy_event(
+                cam=cam,
+                roi=roi,
+                occupancy_count=consumo_count,
+                dwell_seconds_est=consumo_dwell_seconds,
+                ts=ts,
+            )
 
         if self.cfg.alerts_enabled and role == "balcao":
             self._handle_alerts(
@@ -849,6 +948,8 @@ class VisionWorker:
             "fila_count": fila_count,
             "consumo_count": consumo_count,
             "staff_active": staff_at_cashier,
+            "entries": int(agg.get("entries") or 0),
+            "exits": int(agg.get("exits") or 0),
         }
 
     def _handle_alerts(
@@ -1012,30 +1113,61 @@ class VisionWorker:
                 return None
             boxes = res.boxes.xyxy.cpu().numpy().astype(int)
             clss = res.boxes.cls.cpu().numpy().astype(int)
+            track_ids = None
+            if getattr(res.boxes, "id", None) is not None:
+                track_ids = res.boxes.id.cpu().numpy().astype(int)
             items = []
-            for (x1, y1, x2, y2), cls in zip(boxes, clss):
-                items.append([x1, y1, x2, y2, int(cls)])
+            for idx, ((x1, y1, x2, y2), cls) in enumerate(zip(boxes, clss)):
+                track_id = int(track_ids[idx]) if track_ids is not None and idx < len(track_ids) else None
+                items.append([x1, y1, x2, y2, int(cls), track_id])
             return {"boxes": items}
         except Exception as exc:
             self.logger.warning("[VISION] yolo failed: %s", exc)
             return None
 
+    def _infer_metric_type_from_name(self, name: str, shape_type: str) -> str:
+        canonical = self._canonical_shape_name(name)
+        if shape_type == "line":
+            return "entry_exit"
+        if canonical in {"area_atendimento_fila", "fila", "espera"}:
+            return "queue"
+        if canonical in {"ponto_pagamento", "caixa", "checkout"}:
+            return "checkout_proxy"
+        if canonical in {"area_consumo", "salao", "mesa"}:
+            return "occupancy"
+        return "custom"
+
     def _extract_roi(self, cam: dict, frame) -> Optional[dict]:
+        camera_zone_id = cam.get("zone_id")
         if cam.get("roi_local"):
             roi_local = cam.get("roi_local") or {}
             zones_raw = roi_local.get("zones") or {}
             lines_raw = roi_local.get("lines") or {}
             zones: Dict[str, List[List[int]]] = {}
+            zone_meta: Dict[str, dict] = {}
             for name, pts in zones_raw.items():
                 if not name or not pts:
                     continue
                 zones[name] = [[int(p[0]), int(p[1])] for p in pts]
+                zone_meta[name] = {
+                    "zone_id": camera_zone_id,
+                    "roi_entity_id": name,
+                    "metric_type": self._infer_metric_type_from_name(name, "zone"),
+                    "ownership": "primary",
+                }
             lines: Dict[str, List[List[int]]] = {}
+            line_meta: Dict[str, dict] = {}
             for name, pts in lines_raw.items():
                 if not name or not pts or len(pts) != 2:
                     continue
                 lines[name] = [[int(pts[0][0]), int(pts[0][1])], [int(pts[1][0]), int(pts[1][1])]]
-            return {"zones": zones, "lines": lines}
+                line_meta[name] = {
+                    "zone_id": camera_zone_id,
+                    "roi_entity_id": name,
+                    "metric_type": self._infer_metric_type_from_name(name, "line"),
+                    "ownership": "primary",
+                }
+            return {"zones": zones, "lines": lines, "zone_meta": zone_meta, "line_meta": line_meta}
         config_json = cam.get("roi") or {}
         if not isinstance(config_json, dict):
             return None
@@ -1044,6 +1176,7 @@ class VisionWorker:
 
         h, w = frame.shape[:2]
         zones: Dict[str, List[List[int]]] = {}
+        zone_meta: Dict[str, dict] = {}
         for z in zones_raw:
             name = z.get("name")
             pts = z.get("points") or []
@@ -1053,8 +1186,15 @@ class VisionWorker:
             for p in pts:
                 px.append([int(p["x"] * w), int(p["y"] * h)])
             zones[name] = px
+            zone_meta[name] = {
+                "zone_id": z.get("zone_id") or camera_zone_id,
+                "roi_entity_id": z.get("roi_entity_id") or z.get("id") or name,
+                "metric_type": z.get("metric_type") or self._infer_metric_type_from_name(name, "zone"),
+                "ownership": z.get("ownership") or "primary",
+            }
 
         lines: Dict[str, List[List[int]]] = {}
+        line_meta: Dict[str, dict] = {}
         for ln in lines_raw:
             name = ln.get("name")
             pts = ln.get("points") or []
@@ -1063,10 +1203,16 @@ class VisionWorker:
             p1 = [int(pts[0]["x"] * w), int(pts[0]["y"] * h)]
             p2 = [int(pts[1]["x"] * w), int(pts[1]["y"] * h)]
             lines[name] = [p1, p2]
+            line_meta[name] = {
+                "zone_id": ln.get("zone_id") or camera_zone_id,
+                "roi_entity_id": ln.get("roi_entity_id") or ln.get("id") or name,
+                "metric_type": ln.get("metric_type") or self._infer_metric_type_from_name(name, "line"),
+                "ownership": ln.get("ownership") or "primary",
+            }
 
         if not zones and not lines:
             return None
-        return {"zones": zones, "lines": lines}
+        return {"zones": zones, "lines": lines, "zone_meta": zone_meta, "line_meta": line_meta}
 
     def _build_video_camera(self) -> Optional[dict]:
         camera_id = self._get_video_camera_id()
@@ -1144,10 +1290,59 @@ class VisionWorker:
             return "entrada"
         return None
 
+    def _select_metric_context(
+        self,
+        roi: Optional[dict],
+        *,
+        entity_type: str,
+        metric_type: str,
+        fallback_zone_id: Optional[str],
+    ) -> dict:
+        if entity_type == "line":
+            meta_map = (roi or {}).get("line_meta") or {}
+        else:
+            meta_map = (roi or {}).get("zone_meta") or {}
+        values = [value for value in meta_map.values() if isinstance(value, dict)]
+        matching = [value for value in values if value.get("metric_type") == metric_type]
+        primary_matching = [value for value in matching if value.get("ownership") != "secondary"]
+        primary_values = [value for value in values if value.get("ownership") != "secondary"]
+        selected = None
+        if primary_matching:
+            selected = primary_matching[0]
+        elif matching:
+            selected = matching[0]
+        elif primary_values:
+            selected = primary_values[0]
+        elif values:
+            selected = values[0]
+        selected = selected or {}
+        return {
+            "zone_id": selected.get("zone_id") or fallback_zone_id,
+            "roi_entity_id": selected.get("roi_entity_id"),
+            "metric_type": selected.get("metric_type") or metric_type,
+            "ownership": selected.get("ownership") or "primary",
+        }
+
     def _build_payload(self, cam: dict, state: dict, last_metrics: dict, bucket_start: int, bucket_end: int) -> dict:
         agg = state["agg"]
         frames = max(agg["frames"], 1)
         role = self.cfg.video_role or cam.get("role") or self._resolve_role(cam)
+        roi = state.get("last_roi_context") or {}
+        camera_zone_id = cam.get("zone_id")
+
+        traffic_context = self._select_metric_context(
+            roi,
+            entity_type="line" if role == "entrada" else "zone",
+            metric_type="entry_exit" if role == "entrada" else ("occupancy" if role == "salao" else "queue"),
+            fallback_zone_id=camera_zone_id,
+        )
+        conversion_context = self._select_metric_context(
+            roi,
+            entity_type="zone",
+            metric_type="checkout_proxy",
+            fallback_zone_id=camera_zone_id,
+        )
+
         payload = {
             "store_id": self.store_id,
             "camera_id": str(cam.get("camera_id") or cam.get("id") or ""),
@@ -1158,19 +1353,38 @@ class VisionWorker:
                 "start": _iso(bucket_start),
                 "end": _iso(bucket_end),
             },
+            "ownership": {
+                "mode": "single_camera_owner",
+                "camera_id": str(cam.get("camera_id") or cam.get("id") or ""),
+                "camera_role": role or "unknown",
+            },
             "traffic": {
-                "footfall": agg["entries"],
-                "engaged": 0,
-                "dwell_seconds_avg": 0,
+                "footfall": agg["entries"] if role == "entrada" else 0,
+                "entries": int(agg.get("entries") or 0),
+                "exits": int(agg.get("exits") or 0),
+                "engaged": int(agg.get("consumo_max") or 0) if role == "salao" else 0,
+                "dwell_seconds_avg": (
+                    int((agg.get("consumo_dwell_sum") or 0) / max(1, int(agg.get("consumo_dwell_samples") or 0)))
+                    if role == "salao" and int(agg.get("consumo_dwell_samples") or 0) > 0
+                    else 0
+                ),
+                "zone_id": traffic_context.get("zone_id"),
+                "roi_entity_id": traffic_context.get("roi_entity_id"),
+                "metric_type": traffic_context.get("metric_type"),
             },
             "conversion": {
                 "queue_avg_seconds": int(agg["fila_sum"] / frames) if frames else 0,
                 "staff_active_est": int(agg["staff_active_est"]),
                 "checkout_events": int(agg.get("checkout_events") or 0),
+                "conversion_method": "checkout_proxy" if role == "balcao" else None,
+                "zone_id": conversion_context.get("zone_id"),
+                "roi_entity_id": conversion_context.get("roi_entity_id"),
+                "metric_type": conversion_context.get("metric_type") if role == "balcao" else None,
             },
             "debug": {
                 "frame_source": "rtsp_or_snapshot",
                 "snapshot_url_present": bool(cam.get("last_snapshot_url")),
+                "line_crossings_count": int(agg.get("line_crossings_count") or 0),
             },
         }
         return payload
@@ -1253,3 +1467,270 @@ class VisionWorker:
             self.logger.info("[VISION] event sent status=%s receipt=%s", resp.status_code, receipt_id[:10])
         except Exception as exc:
             self.logger.warning("[VISION] event send failed: %s", exc)
+
+    def _send_crossing_event(
+        self,
+        *,
+        cam: dict,
+        line_name: str,
+        line_meta: dict,
+        direction: str,
+        ts: float,
+        track_id: int,
+    ) -> None:
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+        roi_version = (cam.get("roi") or {}).get("roi_version")
+        track_hash = _sha256(f"{camera_id}|{track_id}")
+        event_name = "vision.crossing.v1"
+        receipt_id = _sha256(
+            f"{event_name}|{self.store_id}|{camera_id}|{line_name}|{direction}|{int(ts * 1000)}|{track_hash}"
+        )
+        payload = {
+            "event_type": event_name,
+            "store_id": self.store_id,
+            "camera_id": camera_id,
+            "camera_role": self.cfg.video_role or cam.get("role") or self._resolve_role(cam) or "entrada",
+            "zone_id": line_meta.get("zone_id") or cam.get("zone_id"),
+            "roi_entity_id": line_meta.get("roi_entity_id") or line_name,
+            "roi_version": roi_version,
+            "metric_type": line_meta.get("metric_type") or "entry_exit",
+            "ownership": line_meta.get("ownership") or "primary",
+            "direction": direction,
+            "count_value": 1,
+            "confidence": 1.0,
+            "track_id_hash": track_hash,
+            "ts": _iso(ts),
+        }
+        envelope = {
+            "event_name": event_name,
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "ts": payload["ts"],
+            "data": payload,
+        }
+        url = f"{self.cloud_base_url}/api/edge/events/"
+        headers = build_auth_headers(self.edge_token)
+        try:
+            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
+            self.logger.info(
+                "[VISION] crossing sent status=%s camera_id=%s direction=%s",
+                resp.status_code,
+                camera_id,
+                direction,
+            )
+        except Exception as exc:
+            self.logger.warning("[VISION] crossing send failed: %s", exc)
+
+    def _send_queue_state_event(
+        self,
+        *,
+        cam: dict,
+        roi: Optional[dict],
+        queue_length: int,
+        staff_active_est: int,
+        ts: float,
+    ) -> None:
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+        roi_version = (cam.get("roi") or {}).get("roi_version")
+        context = self._select_metric_context(
+            roi,
+            entity_type="zone",
+            metric_type="queue",
+            fallback_zone_id=cam.get("zone_id"),
+        )
+        event_name = "vision.queue_state.v1"
+        receipt_id = _sha256(
+            f"{event_name}|{self.store_id}|{camera_id}|{context.get('roi_entity_id')}|{int(ts * 1000)}|{queue_length}|{staff_active_est}"
+        )
+        payload = {
+            "event_type": event_name,
+            "store_id": self.store_id,
+            "camera_id": camera_id,
+            "camera_role": self.cfg.video_role or cam.get("role") or self._resolve_role(cam) or "balcao",
+            "zone_id": context.get("zone_id"),
+            "roi_entity_id": context.get("roi_entity_id"),
+            "roi_version": roi_version,
+            "metric_type": context.get("metric_type") or "queue",
+            "ownership": context.get("ownership") or "primary",
+            "count_value": int(queue_length),
+            "staff_active_est": int(staff_active_est),
+            "confidence": 1.0,
+            "ts": _iso(ts),
+        }
+        envelope = {
+            "event_name": event_name,
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "ts": payload["ts"],
+            "data": payload,
+        }
+        url = f"{self.cloud_base_url}/api/edge/events/"
+        headers = build_auth_headers(self.edge_token)
+        try:
+            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
+            self.logger.info(
+                "[VISION] queue_state sent status=%s camera_id=%s queue=%s staff=%s",
+                resp.status_code,
+                camera_id,
+                queue_length,
+                staff_active_est,
+            )
+        except Exception as exc:
+            self.logger.warning("[VISION] queue_state send failed: %s", exc)
+
+    def _send_zone_occupancy_event(
+        self,
+        *,
+        cam: dict,
+        roi: Optional[dict],
+        occupancy_count: int,
+        dwell_seconds_est: int,
+        ts: float,
+    ) -> None:
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+        roi_version = (cam.get("roi") or {}).get("roi_version")
+        context = self._select_metric_context(
+            roi,
+            entity_type="zone",
+            metric_type="occupancy",
+            fallback_zone_id=cam.get("zone_id"),
+        )
+        event_name = "vision.zone_occupancy.v1"
+        receipt_id = _sha256(
+            f"{event_name}|{self.store_id}|{camera_id}|{context.get('roi_entity_id')}|{int(ts * 1000)}|{occupancy_count}|{dwell_seconds_est}"
+        )
+        payload = {
+            "event_type": event_name,
+            "store_id": self.store_id,
+            "camera_id": camera_id,
+            "camera_role": self.cfg.video_role or cam.get("role") or self._resolve_role(cam) or "salao",
+            "zone_id": context.get("zone_id"),
+            "roi_entity_id": context.get("roi_entity_id"),
+            "roi_version": roi_version,
+            "metric_type": context.get("metric_type") or "occupancy",
+            "ownership": context.get("ownership") or "primary",
+            "count_value": int(occupancy_count),
+            "duration_seconds": int(dwell_seconds_est),
+            "confidence": 1.0,
+            "ts": _iso(ts),
+        }
+        envelope = {
+            "event_name": event_name,
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "ts": payload["ts"],
+            "data": payload,
+        }
+        url = f"{self.cloud_base_url}/api/edge/events/"
+        headers = build_auth_headers(self.edge_token)
+        try:
+            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
+            self.logger.info(
+                "[VISION] zone_occupancy sent status=%s camera_id=%s occupancy=%s",
+                resp.status_code,
+                camera_id,
+                occupancy_count,
+            )
+        except Exception as exc:
+            self.logger.warning("[VISION] zone_occupancy send failed: %s", exc)
+
+    def _track_checkout_cycle(
+        self,
+        *,
+        state: dict,
+        cam: dict,
+        roi: Optional[dict],
+        clients_at_pay: int,
+        staff_active: int,
+        ts: float,
+    ) -> None:
+        cycle = state.get("checkout_cycle") or {}
+        in_cycle = bool(cycle.get("in_cycle"))
+        interaction_start = cycle.get("interaction_start")
+        last_checkout = float(cycle.get("last_checkout", -1e9))
+
+        if clients_at_pay >= 1 and staff_active >= 0:
+            if not in_cycle:
+                cycle["in_cycle"] = True
+                cycle["interaction_start"] = ts
+            state["checkout_cycle"] = cycle
+            return
+
+        if not in_cycle:
+            return
+
+        duration_seconds = int(max(0, round(ts - float(interaction_start or ts))))
+        cycle["in_cycle"] = False
+        cycle["interaction_start"] = None
+        state["checkout_cycle"] = cycle
+        if duration_seconds < 2:
+            return
+        if (ts - last_checkout) < 4.0:
+            return
+
+        cycle["last_checkout"] = ts
+        state["checkout_cycle"] = cycle
+        state["agg"]["checkout_events"] = int(state["agg"].get("checkout_events") or 0) + 1
+        self._send_checkout_proxy_event(
+            cam=cam,
+            roi=roi,
+            duration_seconds=duration_seconds,
+            interaction_count=1,
+            ts=ts,
+        )
+
+    def _send_checkout_proxy_event(
+        self,
+        *,
+        cam: dict,
+        roi: Optional[dict],
+        duration_seconds: int,
+        interaction_count: int,
+        ts: float,
+    ) -> None:
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+        roi_version = (cam.get("roi") or {}).get("roi_version")
+        context = self._select_metric_context(
+            roi,
+            entity_type="zone",
+            metric_type="checkout_proxy",
+            fallback_zone_id=cam.get("zone_id"),
+        )
+        event_name = "vision.checkout_proxy.v1"
+        receipt_id = _sha256(
+            f"{event_name}|{self.store_id}|{camera_id}|{context.get('roi_entity_id')}|{int(ts * 1000)}|{duration_seconds}|{interaction_count}"
+        )
+        payload = {
+            "event_type": event_name,
+            "store_id": self.store_id,
+            "camera_id": camera_id,
+            "camera_role": self.cfg.video_role or cam.get("role") or self._resolve_role(cam) or "balcao",
+            "zone_id": context.get("zone_id"),
+            "roi_entity_id": context.get("roi_entity_id"),
+            "roi_version": roi_version,
+            "metric_type": context.get("metric_type") or "checkout_proxy",
+            "ownership": context.get("ownership") or "primary",
+            "count_value": int(interaction_count),
+            "duration_seconds": int(duration_seconds),
+            "confidence": 1.0,
+            "ts": _iso(ts),
+        }
+        envelope = {
+            "event_name": event_name,
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "ts": payload["ts"],
+            "data": payload,
+        }
+        url = f"{self.cloud_base_url}/api/edge/events/"
+        headers = build_auth_headers(self.edge_token)
+        try:
+            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
+            self.logger.info(
+                "[VISION] checkout_proxy sent status=%s camera_id=%s duration=%s",
+                resp.status_code,
+                camera_id,
+                duration_seconds,
+            )
+        except Exception as exc:
+            self.logger.warning("[VISION] checkout_proxy send failed: %s", exc)
