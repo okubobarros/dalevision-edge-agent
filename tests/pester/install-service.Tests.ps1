@@ -1,6 +1,6 @@
 Describe "release bundle" {
-  It ".env contains all required keys in order" {
-    $envPath = Join-Path $PSScriptRoot "../../release/.env"
+  It ".env template contains all required keys in order" {
+    $envPath = Join-Path $PSScriptRoot "../../release/.env.template"
     (Test-Path $envPath) | Should Be $true
 
     $lines = Get-Content -Path $envPath |
@@ -18,7 +18,14 @@ Describe "release bundle" {
       "AUTO_UPDATE_ENABLED=0",
       "UPDATE_CHANNEL=stable",
       "UPDATE_GITHUB_REPO=daleship/dalevision-edge-agent",
-      "UPDATE_INTERVAL_SECONDS=21600"
+      "UPDATE_INTERVAL_SECONDS=21600",
+      "EDGE_HTTP_TIMEOUT_SECONDS=30",
+      "EDGE_ROI_TIMEOUT_SECONDS=20",
+      "STARTUP_TASK_ENABLED=0",
+      "VISION_ENABLED=1",
+      "VISION_BUCKET_SECONDS=30",
+      "VISION_POLL_SECONDS=10",
+      "VISION_SNAPSHOT_TIMEOUT_SECONDS=10"
     )
 
     $lines | Should Be $expected

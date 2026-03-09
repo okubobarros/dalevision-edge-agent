@@ -74,6 +74,18 @@ function Show-TaskInfo {
   }
 }
 
+function StartupTaskEnabled {
+  param([hashtable]$EnvVars)
+  foreach ($key in @("STARTUP_TASK_ENABLED", "EDGE_STARTUP_TASK_ENABLED")) {
+    $raw = $EnvVars[$key]
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      continue
+    }
+    return ($raw.Trim() -eq "1")
+  }
+  return $false
+}
+
 $installRoot = Split-Path -Parent $PSScriptRoot
 $programDataRoot = $env:PROGRAMDATA
 if ([string]::IsNullOrWhiteSpace($programDataRoot)) {
@@ -89,6 +101,7 @@ $updateLog = Join-Path $installRoot "logs\update.log"
 $envPath = Join-Path $installRoot ".env"
 $envVars = Read-EnvFile -Path $envPath
 $autoEnabled = ($envVars["AUTO_UPDATE_ENABLED"] -eq "1")
+$startupEnabled = StartupTaskEnabled -EnvVars $envVars
 $buildInfo = Join-Path $installRoot "BUILD_INFO.txt"
 
 if (Test-Path $buildInfo) {
@@ -101,7 +114,12 @@ Write-Host "=== Agent logon task ==="
 $agentOk = Show-TaskInfo -Name $TaskName
 Write-Host ""
 Write-Host "=== Agent startup task ==="
-$startupOk = Show-TaskInfo -Name $StartupTaskName
+if ($startupEnabled) {
+  $startupOk = Show-TaskInfo -Name $StartupTaskName
+} else {
+  Write-Host "STARTUP_TASK_ENABLED=0 (task opcional desabilitada)"
+  $startupOk = $false
+}
 Write-Host ""
 Write-Host "=== Update task ==="
 if ($autoEnabled) {
@@ -144,7 +162,7 @@ if (Test-Path $updateLog) {
   Get-Content -Path $updateLog -Tail 30 | ForEach-Object { Write-Host "  $_" }
 }
 
-if ($agentOk -or $startupOk) {
+if ($agentOk -or ($startupEnabled -and $startupOk)) {
   exit 0
 }
 exit 1
