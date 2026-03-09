@@ -43,11 +43,89 @@ Write-Host ("USER=" + $env:USERNAME)
 
 Set-Location -Path $installRoot
 
-$oldEap = $ErrorActionPreference
-$ErrorActionPreference = "Continue"
-& $exePath run
-$exitCode = $LASTEXITCODE
-$ErrorActionPreference = $oldEap
+function Get-EnvInt {
+  param(
+    [string]$Name,
+    [int]$DefaultValue
+  )
 
-Write-Host ("EXIT_CODE=" + $exitCode)
-exit $exitCode
+  $raw = [Environment]::GetEnvironmentVariable($Name)
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return $DefaultValue
+  }
+
+  $parsed = 0
+  if ([int]::TryParse($raw, [ref]$parsed)) {
+    return $parsed
+  }
+  return $DefaultValue
+}
+
+function Get-EnvBool {
+  param(
+    [string]$Name,
+    [bool]$DefaultValue
+  )
+
+  $raw = [Environment]::GetEnvironmentVariable($Name)
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return $DefaultValue
+  }
+
+  switch ($raw.Trim().ToLowerInvariant()) {
+    "1" { return $true }
+    "true" { return $true }
+    "yes" { return $true }
+    "on" { return $true }
+    "0" { return $false }
+    "false" { return $false }
+    "no" { return $false }
+    "off" { return $false }
+    default { return $DefaultValue }
+  }
+}
+
+$restartEnabled = Get-EnvBool -Name "LAUNCHER_RESTART_ENABLED" -DefaultValue $true
+$restartDelaySeconds = Get-EnvInt -Name "LAUNCHER_RESTART_DELAY_SECONDS" -DefaultValue 5
+$restartMax = Get-EnvInt -Name "LAUNCHER_RESTART_MAX" -DefaultValue 1000
+$restartCount = 0
+
+Write-Host ("LAUNCHER_RESTART_ENABLED=" + $restartEnabled)
+Write-Host ("LAUNCHER_RESTART_DELAY_SECONDS=" + $restartDelaySeconds)
+Write-Host ("LAUNCHER_RESTART_MAX=" + $restartMax)
+
+while ($true) {
+  $restartCount += 1
+  Write-Host ("LAUNCH_ATTEMPT=" + $restartCount)
+
+  $oldEap = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $proc = $null
+  try {
+    $proc = Start-Process -FilePath $exePath -ArgumentList "run" -WorkingDirectory $installRoot -PassThru -Wait
+    $exitCode = $proc.ExitCode
+  } catch {
+    $exitCode = 9009
+    Write-Host ("LAUNCH_ERROR=" + $_.Exception.Message)
+  }
+  $ErrorActionPreference = $oldEap
+
+  Write-Host ("EXIT_CODE=" + $exitCode)
+
+  if (-not $restartEnabled) {
+    exit $exitCode
+  }
+
+  if ($exitCode -eq 0) {
+    Write-Host "EXIT_REASON=clean_exit"
+    exit 0
+  }
+
+  if ($restartCount -ge $restartMax) {
+    Write-Host "EXIT_REASON=restart_limit_reached"
+    exit $exitCode
+  }
+
+  Write-Host ("RESTARTING_IN_SECONDS=" + $restartDelaySeconds)
+  Start-Sleep -Seconds $restartDelaySeconds
+}
