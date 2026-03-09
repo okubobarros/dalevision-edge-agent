@@ -89,3 +89,41 @@ def test_resolve_role_maps_caixa_name_to_balcao() -> None:
     )
 
     assert role == "balcao"
+
+
+def test_extract_roi_uses_remote_roi_when_local_roi_is_empty() -> None:
+    worker = VisionWorker(
+        cloud_base_url="https://api.example.com",
+        store_id="store-1",
+        edge_token="token",
+        logger=Mock(),
+    )
+    cam = {
+        "id": "cam-1",
+        "camera_id": "cam-1",
+        "zone_id": "zone-front",
+        "roi_local": {"zones": {}, "lines": {}},
+        "roi": {
+            "lines": [
+                {
+                    "id": "entry-line",
+                    "name": "Linha Entrada",
+                    "type": "line",
+                    "metric_type": "entry_exit",
+                    "ownership": "primary",
+                    "zone_id": "zone-front",
+                    "roi_entity_id": "entry-line",
+                    "points": [{"x": 0.5, "y": 0.0}, {"x": 0.5, "y": 1.0}],
+                }
+            ]
+        },
+    }
+
+    class Frame:
+        shape = (100, 100, 3)
+
+    roi = worker._extract_roi(cam, Frame())
+
+    assert roi is not None
+    assert "Linha Entrada" in roi["lines"]
+    assert roi["line_meta"]["Linha Entrada"]["metric_type"] == "entry_exit"

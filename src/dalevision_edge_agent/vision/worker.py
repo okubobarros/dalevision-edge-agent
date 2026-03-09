@@ -1139,8 +1139,8 @@ class VisionWorker:
 
     def _extract_roi(self, cam: dict, frame) -> Optional[dict]:
         camera_zone_id = cam.get("zone_id")
-        if cam.get("roi_local"):
-            roi_local = cam.get("roi_local") or {}
+        roi_local = cam.get("roi_local") or {}
+        if roi_local.get("zones") or roi_local.get("lines"):
             zones_raw = roi_local.get("zones") or {}
             lines_raw = roi_local.get("lines") or {}
             zones: Dict[str, List[List[int]]] = {}

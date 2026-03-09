@@ -14,7 +14,11 @@ a = Analysis(
         ('scripts\\internal\\Start_DaleVision_Agent.bat', 'scripts\\internal'),
         ('release\\run_agent.cmd', '.'),
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        'lap',
+        'charset_normalizer',
+        'chardet',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
