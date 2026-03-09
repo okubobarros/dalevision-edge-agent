@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import logging
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -45,6 +46,17 @@ class AuthFailureTracker:
 
     def reset(self) -> None:
         self.consecutive = 0
+
+
+def _resolve_timeout_seconds(default: int, env_name: str) -> int:
+    raw = (os.getenv(env_name) or os.getenv("EDGE_HTTP_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def _utc_timestamp() -> str:
@@ -187,6 +199,7 @@ def fetch_cameras(
     auth_tracker: Optional[AuthFailureTracker] = None,
 ) -> tuple[list[dict[str, Any]], Optional[str]]:
     logger = logger or logging.getLogger("dalevision-edge-agent")
+    timeout_seconds = _resolve_timeout_seconds(timeout_seconds, "EDGE_CAMERA_LIST_TIMEOUT_SECONDS")
     base_url = _normalize_base_url(cloud_base_url)
     headers = build_auth_headers(edge_token)
     auth_debug = _format_auth_header_debug(headers)
@@ -284,6 +297,7 @@ def fetch_roi(
     auth_tracker: Optional[AuthFailureTracker] = None,
 ) -> tuple[Optional[dict[str, Any]], Optional[str], bool, Optional[str]]:
     logger = logger or logging.getLogger("dalevision-edge-agent")
+    timeout_seconds = _resolve_timeout_seconds(timeout_seconds, "EDGE_ROI_TIMEOUT_SECONDS")
     cached = _load_cached_roi(camera_id=camera_id, cache_dir=cache_dir)
     cached_version = (
         str(cached.get("version")) if isinstance(cached, dict) and cached.get("version") else None

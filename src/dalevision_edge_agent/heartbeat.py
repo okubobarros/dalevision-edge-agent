@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from typing import Any, Optional, Tuple
 
 import requests
@@ -8,6 +9,17 @@ import requests
 from .cameras import build_auth_headers
 
 REQUEST_TIMEOUT_SECONDS = 10
+
+
+def _resolve_timeout_seconds(default: int) -> int:
+    raw = (os.getenv("EDGE_HTTP_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def _utc_timestamp() -> str:
@@ -24,6 +36,7 @@ def send_heartbeat(
     timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
     extra_data: Optional[dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[int], Optional[str]]:
+    timeout_seconds = _resolve_timeout_seconds(timeout_seconds)
     data = {
         "store_id": store_id,
         "ts": _utc_timestamp(),
