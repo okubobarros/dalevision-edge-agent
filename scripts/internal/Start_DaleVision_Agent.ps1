@@ -100,10 +100,9 @@ while ($true) {
 
   $oldEap = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  $proc = $null
   try {
-    $proc = Start-Process -FilePath $exePath -ArgumentList "run" -WorkingDirectory $installRoot -PassThru -Wait
-    $exitCode = $proc.ExitCode
+    & $exePath run
+    $exitCode = $LASTEXITCODE
   } catch {
     $exitCode = 9009
     Write-Host ("LAUNCH_ERROR=" + $_.Exception.Message)
