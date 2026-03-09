@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import re
 import subprocess
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
+from dotenv import dotenv_values
 
 from ..cameras import _ffmpeg_path, build_auth_headers, fetch_roi, mask_rtsp_url
 from .geometry import line_side, point_in_polygon
@@ -360,6 +362,24 @@ class VisionWorker:
             cameras.append(normalized)
         return cameras, None
 
+    def _load_cameras_json_from_env_file(self) -> str:
+        env_path = Path.cwd() / ".env"
+        if not env_path.exists():
+            return ""
+        try:
+            raw_text = env_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raw_text = env_path.read_text(encoding="latin-1")
+        try:
+            values = dotenv_values(stream=io.StringIO(raw_text))
+        except Exception as exc:
+            self.logger.warning("[VISION] env fallback parse failed path=%s error=%s", env_path, exc)
+            return ""
+        raw = str(values.get("CAMERAS_JSON") or "").strip()
+        if raw:
+            self.logger.info("[VISION] CAMERAS_JSON loaded from .env fallback path=%s len=%s", env_path, len(raw))
+        return raw
+
     def _normalize_camera(self, cam: Any) -> Optional[dict]:
         if not isinstance(cam, dict):
             return None
@@ -557,6 +577,8 @@ class VisionWorker:
 
         local_only = self._parse_bool_env("VISION_LOCAL_CAMERAS_ONLY", True)
         cameras_json_raw = _env_str("CAMERAS_JSON", "")
+        if not cameras_json_raw.strip():
+            cameras_json_raw = self._load_cameras_json_from_env_file()
         cameras_from_env, env_error = self._parse_cameras_json(cameras_json_raw, source="CAMERAS_JSON")
         if env_error:
             self.logger.warning("[VISION] %s", env_error)

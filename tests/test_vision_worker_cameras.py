@@ -16,6 +16,7 @@ def test_fetch_cameras_uses_cameras_json_without_v1_calls(mock_get, monkeypatch,
     monkeypatch.setenv("CAMERAS_JSON", json.dumps(cameras_payload))
     monkeypatch.setenv("CAMERA_SYNC_ENABLED", "0")
     monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
+    monkeypatch.setenv("ProgramData", str(tmp_path))
 
     worker = VisionWorker(
         cloud_base_url="https://api.example.com",
@@ -27,6 +28,37 @@ def test_fetch_cameras_uses_cameras_json_without_v1_calls(mock_get, monkeypatch,
 
     assert len(cameras) == 3
     assert [cam["id"] for cam in cameras] == ["cam-1", "cam-2", "cam-3"]
+    mock_get.assert_not_called()
+
+
+@patch("dalevision_edge_agent.vision.worker.requests.get")
+def test_fetch_cameras_uses_env_file_fallback_when_process_env_is_empty(mock_get, monkeypatch, tmp_path) -> None:
+    cameras_payload = [
+        {"id": "cam-1", "name": "Cam 1", "rtsp_url": "rtsp://10.0.0.10:554/stream"},
+    ]
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "CAMERA_SYNC_ENABLED=0\n"
+        f"CAMERAS_JSON={json.dumps(cameras_payload)}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CAMERAS_JSON", raising=False)
+    monkeypatch.setenv("CAMERA_SYNC_ENABLED", "0")
+    monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
+    monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    worker = VisionWorker(
+        cloud_base_url="https://api.example.com",
+        store_id="store-1",
+        edge_token="token",
+        logger=Mock(),
+    )
+
+    cameras = worker._fetch_cameras()
+
+    assert len(cameras) == 1
+    assert cameras[0]["id"] == "cam-1"
     mock_get.assert_not_called()
 
 
@@ -56,6 +88,7 @@ def test_fetch_cameras_enriches_local_cameras_with_remote_roi(mock_fetch_roi, mo
     monkeypatch.setenv("CAMERA_SYNC_ENABLED", "0")
     monkeypatch.setenv("VISION_LOCAL_CAMERAS_ONLY", "1")
     monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
+    monkeypatch.setenv("ProgramData", str(tmp_path))
 
     worker = VisionWorker(
         cloud_base_url="https://api.example.com",
