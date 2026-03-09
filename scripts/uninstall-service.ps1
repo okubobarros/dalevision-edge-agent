@@ -1,5 +1,6 @@
 param(
   [string]$TaskName = "DaleVisionEdgeAgent",
+  [string]$StartupTaskName = "DaleVisionEdgeAgentStartup",
   [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate"
 )
 
@@ -38,6 +39,7 @@ try {
   }
 
   Remove-TaskIfExists -Name $TaskName
+  Remove-TaskIfExists -Name $StartupTaskName
   Remove-TaskIfExists -Name $UpdateTaskName
 } catch {
   Write-Log "ERRO: $($_.Exception.Message)"

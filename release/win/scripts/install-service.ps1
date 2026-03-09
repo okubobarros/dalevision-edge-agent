@@ -1,6 +1,7 @@
 param(
   [string]$InstallDir = (Split-Path -Parent $PSScriptRoot),
   [string]$TaskName = "DaleVisionEdgeAgent",
+  [string]$StartupTaskName = "DaleVisionEdgeAgentStartup",
   [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate",
   [switch]$WhatIf
 )
@@ -179,6 +180,7 @@ function Invoke-InstallService {
   param(
     [string]$InstallDir = $PSScriptRoot,
     [string]$TaskName = "DaleVisionEdgeAgent",
+    [string]$StartupTaskName = "DaleVisionEdgeAgentStartup",
     [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate",
     [switch]$WhatIf
   )
@@ -225,6 +227,7 @@ function Invoke-InstallService {
       } else {
         Write-Log "Pasta nao encontrada: $installRoot"
       }
+      Write-Log "ATENCAO: esta janela aguarda Enter para sair."
       Write-Log "Pressione Enter para sair."
       Read-Host | Out-Null
       exit 1
@@ -246,6 +249,7 @@ function Invoke-InstallService {
       "installRoot=$installRoot",
       "exeResolved=$agentExe",
       "taskName=$TaskName",
+      "startupTaskName=$StartupTaskName",
       "command=$taskCmd"
     )
     foreach ($line in $installInfo) {
@@ -298,39 +302,80 @@ function Invoke-InstallService {
       "/TN", $TaskName,
       "/TR", $taskCmd
     )
+    $startupTaskArgs = @(
+      "/Create",
+      "/F",
+      "/SC", "ONSTART",
+      "/RU", "SYSTEM",
+      "/RL", "HIGHEST",
+      "/TN", $StartupTaskName,
+      "/TR", $taskCmd
+    )
+
+    $runCmd = Join-Path $installRoot "run_agent.cmd"
+    if (-not (Test-Path $runCmd)) {
+      throw "run_agent.cmd nao encontrado: $runCmd"
+    }
 
     Write-Log "ABOUT_TO_CREATE_TASK"
     $createCode = 0
     $createOutput = ""
+    $startupCreateCode = 0
+    $startupCreateOutput = ""
     $usedScheduledTasks = $false
     try {
       if (Get-Module -ListAvailable -Name ScheduledTasks) {
         $usedScheduledTasks = $true
-        $runCmd = Join-Path $installRoot "run_agent.cmd"
-        if (-not (Test-Path $runCmd)) {
-          throw "run_agent.cmd nao encontrado: $runCmd"
-        }
         $action = New-ScheduledTaskAction -Execute $runCmd
-        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
-        $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+        $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+        $startupTrigger = New-ScheduledTaskTrigger -AtStartup
+        $logonPrincipal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
+        $startupPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-        $task = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings
-        $createOutput = (Register-ScheduledTask -TaskName $TaskName -InputObject $task -Force | Out-String)
+        $logonTask = New-ScheduledTask -Action $action -Trigger $logonTrigger -Principal $logonPrincipal -Settings $settings
+        $startupTask = New-ScheduledTask -Action $action -Trigger $startupTrigger -Principal $startupPrincipal -Settings $settings
+        $createOutput = (Register-ScheduledTask -TaskName $TaskName -InputObject $logonTask -Force | Out-String)
+        $startupCreateOutput = (Register-ScheduledTask -TaskName $StartupTaskName -InputObject $startupTask -Force | Out-String)
       } else {
         $createOutput = "ScheduledTasks module not available. Falling back to schtasks."
         $createResult = Invoke-Schtasks -SchtasksArgs $taskArgs
         $createCode = $createResult.Code
         $createOutput = ($createOutput + "`n" + ($createResult.Output | Out-String))
+        $startupCreateResult = Invoke-Schtasks -SchtasksArgs $startupTaskArgs
+        $startupCreateCode = $startupCreateResult.Code
+        $startupCreateOutput = ($startupCreateResult.Output | Out-String)
       }
     } catch {
       $createCode = 1
+      $startupCreateCode = 1
       $createOutput = $_.Exception.ToString()
+      $startupCreateOutput = $_.Exception.ToString()
+      $errorText = $_.Exception.Message
+      if ($errorText -match "Acesso negado|Access is denied") {
+        Write-Log "PERMISSION_DENIED: falha ao criar task via ScheduledTasks. Tentando fallback com schtasks.exe."
+        try {
+          $createResult = Invoke-Schtasks -SchtasksArgs $taskArgs
+          $createCode = $createResult.Code
+          $createOutput = ($createResult.Output | Out-String)
+          $startupCreateResult = Invoke-Schtasks -SchtasksArgs $startupTaskArgs
+          $startupCreateCode = $startupCreateResult.Code
+          $startupCreateOutput = ($startupCreateResult.Output | Out-String)
+        } catch {
+          $createCode = 1
+          $startupCreateCode = 1
+          $createOutput = $_.Exception.ToString()
+          $startupCreateOutput = $_.Exception.ToString()
+          Write-Log "PERMISSION_HINT: se a task existir com outro usuario, delete com admin: schtasks /Delete /TN `"$TaskName`" /F"
+        }
+      }
     }
 
     Write-Log ("CREATE_EXITCODE=" + $createCode)
     Write-Log ("CREATE_OUTPUT=" + (($createOutput | Out-String).Trim()))
-    if ($createCode -ne 0) {
-      throw "Falha ao criar a tarefa agendada. ExitCode=$createCode Detalhes: $createOutput"
+    Write-Log ("STARTUP_CREATE_EXITCODE=" + $startupCreateCode)
+    Write-Log ("STARTUP_CREATE_OUTPUT=" + (($startupCreateOutput | Out-String).Trim()))
+    if ($createCode -ne 0 -or $startupCreateCode -ne 0) {
+      throw "Falha ao criar as tarefas agendadas. logon=$createCode startup=$startupCreateCode"
     }
 
     try {
@@ -339,6 +384,12 @@ function Invoke-InstallService {
       if ($actionObj) {
         Write-Log ("TASK_ACTION=" + $actionObj.Execute)
         Write-Log ("TASK_ARGUMENT=" + $actionObj.Arguments)
+      }
+      $startupTaskObj = Get-ScheduledTask -TaskName $StartupTaskName -ErrorAction Stop
+      $startupActionObj = $startupTaskObj.Actions | Select-Object -First 1
+      if ($startupActionObj) {
+        Write-Log ("STARTUP_TASK_ACTION=" + $startupActionObj.Execute)
+        Write-Log ("STARTUP_TASK_ARGUMENT=" + $startupActionObj.Arguments)
       }
     } catch {
       throw "Tarefa nao encontrada apos criacao. Detalhes: $($_.Exception.Message)"
@@ -381,6 +432,7 @@ function Invoke-InstallService {
     Write-Log "Para checar status: schtasks /Query /TN `"$TaskName`" /V /FO LIST"
   } catch {
     Write-Log "ERRO: $($_.Exception.Message)"
+    Write-Log "ATENCAO: esta janela aguarda Enter para sair."
     Write-Log "Pressione Enter para sair."
     Read-Host | Out-Null
     exit 1

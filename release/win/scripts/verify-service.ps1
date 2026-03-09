@@ -1,5 +1,6 @@
 param(
   [string]$TaskName = "DaleVisionEdgeAgent",
+  [string]$StartupTaskName = "DaleVisionEdgeAgentStartup",
   [string]$UpdateTaskName = "DaleVisionEdgeAgentUpdate"
 )
 
@@ -96,8 +97,11 @@ if (Test-Path $buildInfo) {
   Write-Host ""
 }
 
-Write-Host "=== Agent task ==="
+Write-Host "=== Agent logon task ==="
 $agentOk = Show-TaskInfo -Name $TaskName
+Write-Host ""
+Write-Host "=== Agent startup task ==="
+$startupOk = Show-TaskInfo -Name $StartupTaskName
 Write-Host ""
 Write-Host "=== Update task ==="
 if ($autoEnabled) {
@@ -140,7 +144,7 @@ if (Test-Path $updateLog) {
   Get-Content -Path $updateLog -Tail 30 | ForEach-Object { Write-Host "  $_" }
 }
 
-if ($agentOk) {
+if ($agentOk -or $startupOk) {
   exit 0
 }
 exit 1

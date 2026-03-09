@@ -1147,9 +1147,11 @@ class VisionWorker:
     def _build_payload(self, cam: dict, state: dict, last_metrics: dict, bucket_start: int, bucket_end: int) -> dict:
         agg = state["agg"]
         frames = max(agg["frames"], 1)
+        role = self.cfg.video_role or cam.get("role") or self._resolve_role(cam)
         payload = {
             "store_id": self.store_id,
             "camera_id": str(cam.get("camera_id") or cam.get("id") or ""),
+            "camera_role": role or "unknown",
             "roi_version": (cam.get("roi") or {}).get("roi_version"),
             "bucket": {
                 "seconds": self.cfg.bucket_seconds,
@@ -1164,6 +1166,7 @@ class VisionWorker:
             "conversion": {
                 "queue_avg_seconds": int(agg["fila_sum"] / frames) if frames else 0,
                 "staff_active_est": int(agg["staff_active_est"]),
+                "checkout_events": int(agg.get("checkout_events") or 0),
             },
             "debug": {
                 "frame_source": "rtsp_or_snapshot",
