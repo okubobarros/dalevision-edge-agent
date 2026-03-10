@@ -34,13 +34,22 @@ if not exist "%PS1%" (
 
 echo Solicitando permissao de administrador...
 echo Elevating uninstall command...>> "%LOG%"
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%PS1%"" -TaskName ""DaleVisionEdgeAgent"" -UpdateTaskName ""DaleVisionEdgeAgentUpdate""'"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -Wait -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File ""%PS1%"" -TaskName ""DaleVisionEdgeAgent"" -StartupTaskName ""DaleVisionEdgeAgentStartup"" -UpdateTaskName ""DaleVisionEdgeAgentUpdate""'; exit $p.ExitCode"
 set "EC=%errorlevel%"
 echo ELEVATED_EXIT_CODE=%EC%>> "%LOG%"
 
+set "TASK_EXISTS=0"
+schtasks /Query /TN "DaleVisionEdgeAgent" >nul 2>&1 && set "TASK_EXISTS=1"
+echo TASK_EXISTS_AFTER_UNINSTALL=%TASK_EXISTS%>> "%LOG%"
+
 echo.
 if "%EC%"=="0" (
-  echo Remocao concluida.
+  if "%TASK_EXISTS%"=="0" (
+    echo Remocao concluida.
+  ) else (
+    echo ERRO: script retornou sucesso, mas a task ainda existe.
+    set "EC=3"
+  )
 ) else (
   echo ERRO: remocao falhou ou foi cancelada (codigo=%EC%).
 )
@@ -48,4 +57,3 @@ echo.
 echo Log: %LOG%
 pause
 exit /b %EC%
-
