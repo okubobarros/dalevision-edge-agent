@@ -21,7 +21,7 @@ Describe "release bundle" {
       "UPDATE_INTERVAL_SECONDS=21600",
       "EDGE_HTTP_TIMEOUT_SECONDS=30",
       "EDGE_ROI_TIMEOUT_SECONDS=20",
-      "STARTUP_TASK_ENABLED=1",
+      "STARTUP_TASK_ENABLED=0",
       "VISION_ENABLED=1",
       "VISION_BUCKET_SECONDS=30",
       "VISION_POLL_SECONDS=10",
@@ -47,6 +47,7 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/run_agent.cmd") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/run_agent.vbs") -Value "WScript.Quit 0"
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
@@ -80,6 +81,7 @@ Describe "release bundle" {
       "04_REMOVER_AUTOSTART.bat",
       "Diagnose.bat",
       "run_agent.cmd",
+      "run_agent.vbs",
       "BUILD_INFO.txt",
       "README.txt",
       ".env",
@@ -116,6 +118,7 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/run_agent.cmd") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/run_agent.vbs") -Value "WScript.Quit 0"
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"

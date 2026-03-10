@@ -84,6 +84,7 @@ $requiredSources = @(
   @{ Path = (Join-Path $releaseRoot "04_REMOVER_AUTOSTART.bat"); Label = "04_REMOVER_AUTOSTART.bat" },
   @{ Path = (Join-Path $releaseRoot "Diagnose.bat"); Label = "Diagnose.bat" },
   @{ Path = (Join-Path $releaseRoot "run_agent.cmd"); Label = "run_agent.cmd" },
+  @{ Path = (Join-Path $releaseRoot "run_agent.vbs"); Label = "run_agent.vbs" },
   @{ Path = (Join-Path $repoRoot "scripts\install-service.ps1"); Label = "install-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\uninstall-service.ps1"); Label = "uninstall-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\verify-service.ps1"); Label = "verify-service.ps1" },
@@ -111,6 +112,7 @@ Copy-Item (Join-Path $releaseRoot "03_VERIFICAR_STATUS.bat") (Join-Path $release
 Copy-Item (Join-Path $releaseRoot "04_REMOVER_AUTOSTART.bat") (Join-Path $releaseWin "04_REMOVER_AUTOSTART.bat") -Force
 Copy-Item (Join-Path $releaseRoot "Diagnose.bat") (Join-Path $releaseWin "Diagnose.bat") -Force
 Copy-Item (Join-Path $releaseRoot "run_agent.cmd") (Join-Path $releaseWin "run_agent.cmd") -Force
+Copy-Item (Join-Path $releaseRoot "run_agent.vbs") (Join-Path $releaseWin "run_agent.vbs") -Force
 
 # 3.5) gerar .env a partir do template
 Copy-Item $envTemplatePath (Join-Path $releaseWin ".env") -Force
@@ -179,6 +181,7 @@ $required = @(
   "04_REMOVER_AUTOSTART.bat",
   "Diagnose.bat",
   "run_agent.cmd",
+  "run_agent.vbs",
   "BUILD_INFO.txt",
   "README.txt",
   "scripts/install-service.ps1",

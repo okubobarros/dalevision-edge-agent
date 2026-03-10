@@ -129,19 +129,31 @@ function Resolve-AgentExePath {
   return $candidates
 }
 
-function Get-AgentTaskCommand {
+function Resolve-AgentTaskLauncherPath {
   param(
     [string]$InstallRoot,
     [string]$AgentExePath
   )
 
   $installRootResolved = (Resolve-Path $InstallRoot).Path
+  $vbsPath = Join-Path $installRootResolved "run_agent.vbs"
+  if (Test-Path $vbsPath) {
+    return (Resolve-Path $vbsPath).Path
+  }
+
   $runCmdPath = Join-Path $installRootResolved "run_agent.cmd"
   if (-not (Test-Path $runCmdPath)) {
-    throw "run_agent.cmd nao encontrado: $runCmdPath"
+    throw "launcher nao encontrado (run_agent.vbs/run_agent.cmd): $installRootResolved"
   }
-  $runCmd = (Resolve-Path $runCmdPath).Path
-  return "`"$runCmd`""
+  return (Resolve-Path $runCmdPath).Path
+}
+
+function Get-AgentTaskCommand {
+  param(
+    [string]$LauncherPath
+  )
+
+  return "`"$LauncherPath`""
 }
 
 function Get-UpdateIntervalHours {
@@ -195,7 +207,7 @@ function Get-StartupTaskEnabled {
     return ($raw.Trim() -eq "1")
   }
 
-  return $true
+  return $false
 }
 
 function Invoke-InstallService {
@@ -257,7 +269,8 @@ function Invoke-InstallService {
     }
 
     # Executa oculto via PowerShell e grava logs em logs\agent.log.
-    $taskCmd = Get-AgentTaskCommand -InstallRoot $installRoot -AgentExePath $agentExe
+    $launcherPath = Resolve-AgentTaskLauncherPath -InstallRoot $installRoot -AgentExePath $agentExe
+    $taskCmd = Get-AgentTaskCommand -LauncherPath $launcherPath
 
     $psExePath = Join-Path $env:WINDIR "System32\\WindowsPowerShell\\v1.0\\powershell.exe"
     Write-Log "EXISTS_psExe=$(Test-Path $psExePath)"
@@ -278,6 +291,7 @@ function Invoke-InstallService {
       "taskName=$TaskName",
       "startupTaskName=$StartupTaskName",
       "startupTaskEnabled=$startupTaskEnabled",
+      "launcherPath=$launcherPath",
       "command=$taskCmd"
     )
     foreach ($line in $installInfo) {
@@ -330,11 +344,6 @@ function Invoke-InstallService {
       "/TN", $TaskName,
       "/TR", $taskCmd
     )
-    $runCmd = Join-Path $installRoot "run_agent.cmd"
-    if (-not (Test-Path $runCmd)) {
-      throw "run_agent.cmd nao encontrado: $runCmd"
-    }
-
     Write-Log "ABOUT_TO_CREATE_TASK"
     $createCode = 0
     $createOutput = ""
@@ -344,7 +353,7 @@ function Invoke-InstallService {
     try {
       if (Get-Module -ListAvailable -Name ScheduledTasks) {
         $usedScheduledTasks = $true
-        $action = New-ScheduledTaskAction -Execute $runCmd
+        $action = New-ScheduledTaskAction -Execute $launcherPath
         $logonTrigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
         $logonPrincipal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
