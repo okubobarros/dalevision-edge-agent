@@ -195,7 +195,7 @@ function Get-StartupTaskEnabled {
     return ($raw.Trim() -eq "1")
   }
 
-  return $false
+  return $true
 }
 
 function Invoke-InstallService {

@@ -136,9 +136,23 @@ def _create_startup_shortcut(*, logger: logging.Logger) -> tuple[bool, str]:
     startup_dir.mkdir(parents=True, exist_ok=True)
     link_path = startup_dir / "DaleVision Edge Agent.lnk"
 
-    target = str(run_cmd.resolve())
-    workdir = str(run_cmd.resolve().parent)
-    icon = str((run_cmd.resolve().parent / "dalevision-edge-agent.exe"))
+    install_root = run_cmd.resolve().parent
+    launcher_script = install_root / "scripts" / "internal" / "Start_DaleVision_Agent.ps1"
+    if not launcher_script.exists():
+        return False, f"Fallback autostart indisponivel: launcher nao encontrado em {launcher_script}"
+
+    powershell = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not powershell.exists():
+        return False, f"Fallback autostart indisponivel: powershell nao encontrado em {powershell}"
+
+    target = str(powershell.resolve())
+    workdir = str(install_root)
+    icon_path = install_root / "dalevision-edge-agent.exe"
+    icon = str(icon_path if icon_path.exists() else powershell.resolve())
+    args = (
+        f'-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass '
+        f'-File "{launcher_script}" -InstallDir "{install_root}"'
+    )
 
     def _ps_quote(value: str) -> str:
         return value.replace("'", "''")
@@ -147,6 +161,7 @@ def _create_startup_shortcut(*, logger: logging.Logger) -> tuple[bool, str]:
         f"$ws=New-Object -ComObject WScript.Shell;"
         f"$sc=$ws.CreateShortcut('{_ps_quote(str(link_path))}');"
         f"$sc.TargetPath='{_ps_quote(target)}';"
+        f"$sc.Arguments='{_ps_quote(args)}';"
         f"$sc.WorkingDirectory='{_ps_quote(workdir)}';"
         f"$sc.IconLocation='{_ps_quote(icon)},0';"
         "$sc.Save();"

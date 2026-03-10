@@ -10,6 +10,7 @@ $installDirSafe = $installDirSafe.Trim().Trim('"').TrimEnd("\", "/").Trim()
 $installRoot = (Resolve-Path $installDirSafe).Path
 $exePath = Join-Path $installRoot "dalevision-edge-agent.exe"
 $logDir = Join-Path $installRoot "logs"
+$launcherMutexName = "Global\DaleVisionEdgeAgentLauncher"
 
 if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
@@ -18,6 +19,12 @@ if (-not (Test-Path $logDir)) {
 if (-not (Test-Path $exePath)) {
   Write-Host "ERRO: executavel nao encontrado: $exePath"
   exit 2
+}
+
+try {
+  Unblock-File -Path $exePath -ErrorAction SilentlyContinue
+} catch {
+  # Best effort only.
 }
 
 $env:DALE_RUN_MODE = "service"
@@ -94,37 +101,61 @@ Write-Host ("LAUNCHER_RESTART_ENABLED=" + $restartEnabled)
 Write-Host ("LAUNCHER_RESTART_DELAY_SECONDS=" + $restartDelaySeconds)
 Write-Host ("LAUNCHER_RESTART_MAX=" + $restartMax)
 
-while ($true) {
-  $restartCount += 1
-  Write-Host ("LAUNCH_ATTEMPT=" + $restartCount)
-
-  $oldEap = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    & $exePath run
-    $exitCode = $LASTEXITCODE
-  } catch {
-    $exitCode = 9009
-    Write-Host ("LAUNCH_ERROR=" + $_.Exception.Message)
-  }
-  $ErrorActionPreference = $oldEap
-
-  Write-Host ("EXIT_CODE=" + $exitCode)
-
-  if (-not $restartEnabled) {
-    exit $exitCode
-  }
-
-  if ($exitCode -eq 0) {
-    Write-Host "EXIT_REASON=clean_exit"
+$createdNew = $false
+$mutex = $null
+try {
+  $mutex = New-Object System.Threading.Mutex($true, $launcherMutexName, [ref]$createdNew)
+  if (-not $createdNew) {
+    Write-Host "LAUNCHER_ALREADY_RUNNING=1"
     exit 0
   }
 
-  if ($restartCount -ge $restartMax) {
-    Write-Host "EXIT_REASON=restart_limit_reached"
-    exit $exitCode
-  }
+  while ($true) {
+    $restartCount += 1
+    Write-Host ("LAUNCH_ATTEMPT=" + $restartCount)
 
-  Write-Host ("RESTARTING_IN_SECONDS=" + $restartDelaySeconds)
-  Start-Sleep -Seconds $restartDelaySeconds
+    if (-not (Test-Path $exePath)) {
+      Write-Host ("LAUNCH_ERROR=exe_missing path=" + $exePath)
+      $exitCode = 9009
+    } else {
+      $oldEap = $ErrorActionPreference
+      $ErrorActionPreference = "Continue"
+      try {
+        & $exePath run
+        $exitCode = $LASTEXITCODE
+      } catch {
+        $exitCode = 9009
+        Write-Host ("LAUNCH_ERROR=" + $_.Exception.Message)
+      }
+      $ErrorActionPreference = $oldEap
+    }
+
+    Write-Host ("EXIT_CODE=" + $exitCode)
+
+    if (-not $restartEnabled) {
+      exit $exitCode
+    }
+
+    if ($exitCode -eq 0) {
+      Write-Host "EXIT_REASON=clean_exit"
+      exit 0
+    }
+
+    if ($restartCount -ge $restartMax) {
+      Write-Host "EXIT_REASON=restart_limit_reached"
+      exit $exitCode
+    }
+
+    Write-Host ("RESTARTING_IN_SECONDS=" + $restartDelaySeconds)
+    Start-Sleep -Seconds $restartDelaySeconds
+  }
+} finally {
+  if ($mutex -ne $null -and $createdNew) {
+    try {
+      $mutex.ReleaseMutex() | Out-Null
+      $mutex.Dispose()
+    } catch {
+      # ignore
+    }
+  }
 }
