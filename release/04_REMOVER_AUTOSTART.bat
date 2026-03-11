@@ -39,7 +39,7 @@ if not exist "%PS1%" (
 if /I not "%ELEVATED_FLAG%"=="--elevated" (
   echo Solicitando permissao de administrador...
   echo ELEVATE_STEP=start>> "%LOG%"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Start-Process -FilePath '%ComSpec%' -Verb RunAs -Wait -ArgumentList '/c """"%SELF%"" --elevated""'; exit $LASTEXITCODE } catch { Write-Host $_.Exception.Message; exit 1223 }"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath '%ComSpec%' -Verb RunAs -Wait -ArgumentList '/c ""%SELF%"" --elevated'"
   set "EC=%errorlevel%"
   echo ELEVATE_STEP=return code=!EC!>> "%LOG%"
   if not "!EC!"=="0" (
