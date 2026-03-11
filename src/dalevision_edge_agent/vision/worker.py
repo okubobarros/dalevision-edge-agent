@@ -575,36 +575,45 @@ class VisionWorker:
         if self.cfg.source == "video":
             return []
 
-        local_only = self._parse_bool_env("VISION_LOCAL_CAMERAS_ONLY", True)
+        source_mode = str(_env_str("CAMERA_SOURCE_MODE", "api_first") or "api_first").strip().lower()
+        local_only = self._parse_bool_env("VISION_LOCAL_CAMERAS_ONLY", False)
+        if source_mode in {"local_only", "env_only"}:
+            local_only = True
+        elif source_mode not in {"api_first", ""}:
+            self.logger.warning("[VISION] invalid CAMERA_SOURCE_MODE=%s fallback=api_first", source_mode)
+
+        remote_sync_enabled = self._parse_bool_env("VISION_REMOTE_CAMERA_SYNC_ENABLED", True)
+        camera_sync_enabled = self._parse_bool_env("CAMERA_SYNC_ENABLED", True)
+
         cameras_json_raw = _env_str("CAMERAS_JSON", "")
         if not cameras_json_raw.strip():
             cameras_json_raw = self._load_cameras_json_from_env_file()
         cameras_from_env, env_error = self._parse_cameras_json(cameras_json_raw, source="CAMERAS_JSON")
         if env_error:
             self.logger.warning("[VISION] %s", env_error)
-        if cameras_from_env:
-            cameras = self._apply_roi_to_cameras(cameras_from_env)
-            self._save_cameras_cache(cameras, source="CAMERAS_JSON")
-            self.logger.info("[VISION] cameras source=CAMERAS_JSON loaded=%s", len(cameras))
-            return cameras
-        if local_only:
-            self.logger.warning("[VISION] local cameras only enabled and CAMERAS_JSON empty; loaded=0")
-            return []
 
-        remote_sync_enabled = self._parse_bool_env("VISION_REMOTE_CAMERA_SYNC_ENABLED", False)
-        camera_sync_enabled = self._parse_bool_env("CAMERA_SYNC_ENABLED", True)
-        if camera_sync_enabled and remote_sync_enabled:
+        if camera_sync_enabled and remote_sync_enabled and not local_only:
             edge_cameras, edge_source = self._fetch_cameras_from_edge()
             if edge_cameras:
                 cameras = self._apply_roi_to_cameras(edge_cameras)
                 self._save_cameras_cache(cameras, source=edge_source or "edge")
                 self.logger.info("[VISION] cameras source=%s loaded=%s", edge_source or "edge", len(cameras))
                 return cameras
-            self.logger.warning("[VISION] cameras edge sync unavailable; trying cache")
-        elif camera_sync_enabled and not remote_sync_enabled:
+            self.logger.warning("[VISION] cameras edge sync unavailable; trying fallback")
+        elif camera_sync_enabled and not remote_sync_enabled and not local_only:
             self.logger.info("[VISION] remote camera sync disabled for vision (VISION_REMOTE_CAMERA_SYNC_ENABLED=0)")
-        else:
-            self.logger.info("[VISION] cameras sync disabled (CAMERA_SYNC_ENABLED=0); using cache/env only")
+        elif not camera_sync_enabled and not local_only:
+            self.logger.info("[VISION] cameras sync disabled (CAMERA_SYNC_ENABLED=0); using fallback")
+
+        if cameras_from_env:
+            cameras = self._apply_roi_to_cameras(cameras_from_env)
+            self._save_cameras_cache(cameras, source="CAMERAS_JSON")
+            self.logger.info("[VISION] cameras source=CAMERAS_JSON loaded=%s", len(cameras))
+            return cameras
+
+        if local_only:
+            self.logger.warning("[VISION] local cameras only enabled and CAMERAS_JSON empty; loaded=0")
+            return []
 
         cached_cameras, cached_source = self._load_cameras_cache()
         if cached_cameras:

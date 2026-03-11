@@ -32,6 +32,40 @@ def test_fetch_cameras_uses_cameras_json_without_v1_calls(mock_get, monkeypatch,
 
 
 @patch("dalevision_edge_agent.vision.worker.requests.get")
+def test_fetch_cameras_prefers_api_when_source_mode_api_first(mock_get, monkeypatch, tmp_path) -> None:
+    local_payload = [
+        {"id": "cam-local-1", "name": "Cam Local", "rtsp_url": "rtsp://10.0.0.10:554/stream"},
+    ]
+    monkeypatch.setenv("CAMERAS_JSON", json.dumps(local_payload))
+    monkeypatch.setenv("CAMERA_SOURCE_MODE", "api_first")
+    monkeypatch.setenv("CAMERA_SYNC_ENABLED", "1")
+    monkeypatch.setenv("VISION_REMOTE_CAMERA_SYNC_ENABLED", "1")
+    monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
+    monkeypatch.setenv("ProgramData", str(tmp_path))
+
+    response = Mock()
+    response.status_code = 200
+    response.json.return_value = {
+        "results": [
+            {"id": "cam-api-1", "name": "Cam API", "rtsp_url": "rtsp://10.0.0.20:554/stream"},
+        ]
+    }
+    mock_get.return_value = response
+
+    worker = VisionWorker(
+        cloud_base_url="https://api.example.com",
+        store_id="store-1",
+        edge_token="token",
+        logger=Mock(),
+    )
+    cameras = worker._fetch_cameras()
+
+    assert len(cameras) == 1
+    assert cameras[0]["id"] == "cam-api-1"
+    mock_get.assert_called()
+
+
+@patch("dalevision_edge_agent.vision.worker.requests.get")
 def test_fetch_cameras_uses_env_file_fallback_when_process_env_is_empty(mock_get, monkeypatch, tmp_path) -> None:
     cameras_payload = [
         {"id": "cam-1", "name": "Cam 1", "rtsp_url": "rtsp://10.0.0.10:554/stream"},

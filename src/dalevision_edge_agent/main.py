@@ -423,19 +423,41 @@ def _parse_cameras_json(
             return [], f"CAMERAS_JSON item {idx} must be an object"
         camera_id = str(item.get("id") or item.get("camera_id") or "").strip()
         rtsp_url = str(item.get("rtsp_url") or "").strip()
-        if not camera_id or not rtsp_url:
-            return [], f"CAMERAS_JSON item {idx} missing id/rtsp_url"
-        cameras.append(
-            {
-                "id": camera_id,
-                "name": str(item.get("name") or "").strip(),
-                "rtsp_url": rtsp_url,
-            }
-        )
+        ip = str(item.get("ip") or item.get("host") or "").strip()
+        has_connection_hint = bool(rtsp_url or ip)
+        if not camera_id or not has_connection_hint:
+            return [], f"CAMERAS_JSON item {idx} missing id and (rtsp_url or ip)"
+
+        normalized = dict(item)
+        normalized["id"] = camera_id
+        normalized["camera_id"] = camera_id
+        normalized["name"] = str(item.get("name") or "").strip()
+        if rtsp_url:
+            normalized["rtsp_url"] = rtsp_url
+        if ip:
+            normalized["ip"] = ip
+        cameras.append(normalized)
 
     if not cameras:
         logger.warning("CAMERAS_JSON parsed but contained no valid cameras")
     return cameras, None
+
+
+def _resolve_camera_source_mode() -> str:
+    """
+    Source-of-truth selector for cameras.
+
+    - api_first (default): backend API is the primary source; CAMERAS_JSON is fallback.
+    - local_only: CAMERAS_JSON only (no remote camera sync).
+    """
+    raw = (os.getenv("CAMERA_SOURCE_MODE") or "").strip().lower()
+    if raw in {"", "api_first"}:
+        return "api_first"
+    if raw in {"local_only", "env_only"}:
+        return "local_only"
+    raise ValueError(
+        f"Invalid CAMERA_SOURCE_MODE: {raw}. Use 'api_first' or 'local_only'."
+    )
 
 
 def _restart_self(
@@ -950,21 +972,31 @@ def main() -> int:
         camera_sync_fatal,
         vision_source,
     )
+    camera_source_mode = _resolve_camera_source_mode()
     cameras_json_raw = os.getenv("CAMERAS_JSON") or ""
     cameras_json_list, cameras_json_error = _parse_cameras_json(cameras_json_raw, logger)
     if cameras_json_error:
         logger.error("[CAMERA_HEALTH] %s", cameras_json_error)
         cameras_json_list = []
-    local_cameras_mode = len(cameras_json_list) >= 1
+
+    local_cameras_mode = camera_source_mode == "local_only"
     if local_cameras_mode and camera_sync_enabled:
-        logger.info("[CAMERA_HEALTH] local cameras mode active; disabling remote camera sync")
+        logger.info(
+            "[CAMERA_HEALTH] source=local_only; disabling remote camera sync"
+        )
         camera_sync_enabled = False
     if local_cameras_mode:
         os.environ["VISION_LOCAL_CAMERAS_ONLY"] = "1"
         os.environ["VISION_REMOTE_CAMERA_SYNC_ENABLED"] = "0"
         os.environ["CAMERA_SYNC_ENABLED"] = "0"
+    else:
+        os.environ.setdefault("VISION_LOCAL_CAMERAS_ONLY", "0")
+        # Keep current user/env flag if set; default to enabled for api_first.
+        if "VISION_REMOTE_CAMERA_SYNC_ENABLED" not in os.environ:
+            os.environ["VISION_REMOTE_CAMERA_SYNC_ENABLED"] = "1"
     logger.info(
-        "[CAMERA_HEALTH] local_mode=%s cameras_json=%s camera_sync_enabled=%s",
+        "[CAMERA_HEALTH] source_mode=%s local_mode=%s cameras_json=%s camera_sync_enabled=%s",
+        camera_source_mode,
         local_cameras_mode,
         len(cameras_json_list),
         camera_sync_enabled,

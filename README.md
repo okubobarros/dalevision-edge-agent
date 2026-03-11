@@ -15,7 +15,21 @@ Agente local para manter a loja online no cloud e monitorar a saúde das câmera
 ```
 CAMERA_SYNC_FATAL=0
 ```
-- Cenário remoto (fora da rede da loja), opcional para evitar ruído de autenticação/sync:
+- Fonte de verdade de câmeras (recomendado para produto):
+```
+CAMERA_SOURCE_MODE=api_first
+CAMERA_SYNC_ENABLED=1
+VISION_REMOTE_CAMERA_SYNC_ENABLED=1
+CAMERAS_JSON=[]
+```
+- Fallback de contingência (piloto/local):
+```
+CAMERA_SOURCE_MODE=local_only
+CAMERA_SYNC_ENABLED=0
+VISION_REMOTE_CAMERA_SYNC_ENABLED=0
+CAMERAS_JSON=[...]
+```
+- Cenário remoto de diagnóstico (fora da rede da loja), opcional para reduzir ruído:
 ```
 CAMERA_SYNC_ENABLED=0
 ```
