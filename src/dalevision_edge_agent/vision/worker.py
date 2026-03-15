@@ -16,6 +16,7 @@ import requests
 from dotenv import dotenv_values
 
 from ..cameras import _ffmpeg_path, build_auth_headers, fetch_roi, mask_rtsp_url
+from ..events import compute_idempotency_key
 from .geometry import line_side, point_in_polygon
 from .roi_yaml import load_roi_yaml
 from .sources.video import VideoFrameSource
@@ -115,6 +116,7 @@ class VisionConfig:
     roi_path: str = ""
     video_camera_id: str = ""
     video_role: str = ""
+    retail_event_v1_enabled: bool = True
 
     @staticmethod
     def from_env() -> "VisionConfig":
@@ -153,6 +155,7 @@ class VisionConfig:
             roi_path=os.getenv("VISION_ROI_PATH", "").strip(),
             video_camera_id=os.getenv("VISION_CAMERA_ID", "").strip(),
             video_role=os.getenv("VISION_ROLE", "").strip().lower(),
+            retail_event_v1_enabled=os.getenv("VISION_RETAIL_EVENT_V1_ENABLED", "1") == "1",
         )
 
 
@@ -1555,6 +1558,18 @@ class VisionWorker:
         except Exception as exc:
             self.logger.warning("[VISION] crossing send failed: %s", exc)
 
+        retail_event_type = "person_enter" if direction == "entry" else "person_exit"
+        self._send_retail_event(
+            event_type=retail_event_type,
+            value=1,
+            ts=payload["ts"],
+            camera_id=camera_id,
+            zone_id=payload.get("zone_id"),
+            roi_entity_id=payload.get("roi_entity_id"),
+            metric_type="footfall",
+            confidence=payload.get("confidence", 1.0),
+        )
+
     def _send_queue_state_event(
         self,
         *,
@@ -1613,6 +1628,27 @@ class VisionWorker:
         except Exception as exc:
             self.logger.warning("[VISION] queue_state send failed: %s", exc)
 
+        self._send_retail_event(
+            event_type="queue_length",
+            value=int(queue_length),
+            ts=payload["ts"],
+            camera_id=camera_id,
+            zone_id=payload.get("zone_id"),
+            roi_entity_id=payload.get("roi_entity_id"),
+            metric_type="queue",
+            confidence=payload.get("confidence", 1.0),
+        )
+        self._send_retail_event(
+            event_type="staff_detected",
+            value=int(staff_active_est),
+            ts=payload["ts"],
+            camera_id=camera_id,
+            zone_id=payload.get("zone_id"),
+            roi_entity_id=payload.get("roi_entity_id"),
+            metric_type="staff_presence",
+            confidence=payload.get("confidence", 1.0),
+        )
+
     def _send_zone_occupancy_event(
         self,
         *,
@@ -1669,6 +1705,20 @@ class VisionWorker:
             )
         except Exception as exc:
             self.logger.warning("[VISION] zone_occupancy send failed: %s", exc)
+
+        self._send_retail_event(
+            event_type="zone_dwell",
+            value={
+                "occupancy_count": int(occupancy_count),
+                "dwell_seconds_est": int(dwell_seconds_est),
+            },
+            ts=payload["ts"],
+            camera_id=camera_id,
+            zone_id=payload.get("zone_id"),
+            roi_entity_id=payload.get("roi_entity_id"),
+            metric_type="zone_dwell",
+            confidence=payload.get("confidence", 1.0),
+        )
 
     def _track_checkout_cycle(
         self,
@@ -1771,3 +1821,66 @@ class VisionWorker:
             )
         except Exception as exc:
             self.logger.warning("[VISION] checkout_proxy send failed: %s", exc)
+
+        self._send_retail_event(
+            event_type="sale_completed",
+            value=int(interaction_count),
+            ts=payload["ts"],
+            camera_id=camera_id,
+            zone_id=payload.get("zone_id"),
+            roi_entity_id=payload.get("roi_entity_id"),
+            metric_type="sale_proxy",
+            confidence=payload.get("confidence", 1.0),
+        )
+
+    def _send_retail_event(
+        self,
+        *,
+        event_type: str,
+        value: Any,
+        ts: str,
+        camera_id: Optional[str] = None,
+        zone_id: Optional[str] = None,
+        roi_entity_id: Optional[str] = None,
+        metric_type: Optional[str] = None,
+        confidence: float = 1.0,
+    ) -> None:
+        if not self.cfg.retail_event_v1_enabled:
+            return
+        data = {
+            "store_id": self.store_id,
+            "ts": ts,
+            "event_type": event_type,
+            "value": value,
+            "source": "edge",
+            "confidence": confidence,
+            "camera_id": camera_id,
+            "zone_id": zone_id,
+            "roi_entity_id": roi_entity_id,
+            "metric_type": metric_type,
+        }
+        receipt_id = compute_idempotency_key(
+            event_name="retail.event.v1",
+            data=data,
+            ts=ts,
+            bucket_minutes=5,
+        )
+        envelope = {
+            "event_name": "retail.event.v1",
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
+            "ts": ts,
+            "data": data,
+        }
+        url = f"{self.cloud_base_url}/api/edge/events/"
+        headers = build_auth_headers(self.edge_token)
+        try:
+            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
+            self.logger.info(
+                "[VISION] retail.event.v1 sent status=%s type=%s",
+                resp.status_code,
+                event_type,
+            )
+        except Exception as exc:
+            self.logger.warning("[VISION] retail.event.v1 send failed: %s", exc)

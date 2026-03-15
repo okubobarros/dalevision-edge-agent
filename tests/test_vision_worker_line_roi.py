@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from dalevision_edge_agent.vision.worker import VisionWorker
 
@@ -295,3 +295,35 @@ def test_process_frame_emits_zone_occupancy_with_room_roi_context() -> None:
     assert emitted_events[-1]["roi"]["zone_meta"]["area_consumo"]["roi_entity_id"] == "occupancy-zone-1"
     assert payload["traffic"]["engaged"] == 2
     assert payload["traffic"]["dwell_seconds_avg"] == 12
+
+
+@patch("dalevision_edge_agent.vision.worker.requests.post")
+def test_send_retail_event_uses_contract_v1(mock_post: Mock) -> None:
+    mock_response = Mock()
+    mock_response.status_code = 201
+    mock_post.return_value = mock_response
+
+    worker = VisionWorker(
+        cloud_base_url="https://api.example.com",
+        store_id="store-1",
+        edge_token="token",
+        logger=Mock(),
+    )
+    worker._send_retail_event(
+        event_type="queue_length",
+        value=6,
+        ts="2026-03-15T10:32:00Z",
+        camera_id="cam-1",
+        zone_id="zone-front",
+        roi_entity_id="queue-zone-1",
+        metric_type="queue",
+        confidence=0.92,
+    )
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["event_name"] == "retail.event.v1"
+    assert payload["idempotency_key"] == payload["receipt_id"]
+    assert payload["data"]["event_type"] == "queue_length"
+    assert payload["data"]["value"] == 6
+    assert payload["data"]["source"] == "edge"
+    assert payload["data"]["confidence"] == 0.92
