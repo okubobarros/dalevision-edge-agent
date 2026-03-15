@@ -7,6 +7,7 @@ from typing import Any, Optional, Tuple
 import requests
 
 from .cameras import build_auth_headers
+from .events import compute_idempotency_key
 
 REQUEST_TIMEOUT_SECONDS = 10
 
@@ -51,6 +52,14 @@ def send_heartbeat(
         "source": "edge",
         "data": data,
     }
+    receipt_id = compute_idempotency_key(
+        event_name=payload["event_name"],
+        data=data,
+        ts=data.get("ts"),
+        bucket_minutes=1,
+    )
+    payload["receipt_id"] = receipt_id
+    payload["idempotency_key"] = receipt_id
     headers = build_auth_headers(edge_token)
 
     try:

@@ -1120,6 +1120,7 @@ class VisionWorker:
             "event_type": payload.get("event_type"),
             "source": "edge",
             "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
             "ts": payload.get("occurred_at"),
             "data": payload,
         }
@@ -1488,6 +1489,7 @@ class VisionWorker:
             "event_name": event_name,
             "source": "edge",
             "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
             "ts": payload["bucket"]["end"],
             "data": payload,
         }
@@ -1536,6 +1538,7 @@ class VisionWorker:
             "event_name": event_name,
             "source": "edge",
             "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
             "ts": payload["ts"],
             "data": payload,
         }
@@ -1592,6 +1595,7 @@ class VisionWorker:
             "event_name": event_name,
             "source": "edge",
             "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
             "ts": payload["ts"],
             "data": payload,
         }
@@ -1649,6 +1653,7 @@ class VisionWorker:
             "event_name": event_name,
             "source": "edge",
             "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
             "ts": payload["ts"],
             "data": payload,
         }
@@ -1750,6 +1755,7 @@ class VisionWorker:
             "event_name": event_name,
             "source": "edge",
             "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
             "ts": payload["ts"],
             "data": payload,
         }

@@ -13,6 +13,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 import requests
+from .events import compute_idempotency_key
 
 CAMERA_LIST_ENDPOINTS = (
     "/api/v1/stores/{store_id}/cameras/",
@@ -487,6 +488,14 @@ def send_camera_health_event(
         "ts": event_payload["ts"],
         "data": event_payload,
     }
+    receipt_id = compute_idempotency_key(
+        event_name=envelope["event_name"],
+        data=event_payload,
+        ts=envelope["ts"],
+        bucket_minutes=1,
+    )
+    envelope["receipt_id"] = receipt_id
+    envelope["idempotency_key"] = receipt_id
     response, status, error = _request_json_with_backoff(
         method="POST",
         url=url,
@@ -538,6 +547,14 @@ def send_vision_metrics_event(
         "ts": payload.get("ts"),
         "data": payload,
     }
+    receipt_id = compute_idempotency_key(
+        event_name=envelope["event_name"],
+        data=payload,
+        ts=envelope["ts"],
+        bucket_minutes=1,
+    )
+    envelope["receipt_id"] = receipt_id
+    envelope["idempotency_key"] = receipt_id
     response, status, error = _request_json_with_backoff(
         method="POST",
         url=url,

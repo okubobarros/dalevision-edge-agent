@@ -43,6 +43,7 @@ class HeartbeatTests(unittest.TestCase):
         self.assertEqual(201, status)
         self.assertIsNone(error)
         payload = mock_post.call_args.kwargs["json"]
+        self.assertEqual(payload["idempotency_key"], payload["receipt_id"])
         self.assertEqual(2, payload["data"]["cameras_total"])
         self.assertEqual("cam-1", payload["data"]["cameras"][0]["camera_id"])
 

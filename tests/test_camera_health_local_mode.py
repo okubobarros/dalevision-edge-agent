@@ -34,6 +34,7 @@ def test_send_camera_health_event_posts_edge_events(mock_request: Mock) -> None:
     kwargs = mock_request.call_args.kwargs
     assert kwargs["url"] == "https://api.example.com/api/edge/events/"
     assert kwargs["json"]["event_name"] == "camera_health"
+    assert kwargs["json"]["idempotency_key"] == kwargs["json"]["receipt_id"]
     assert kwargs["json"]["data"]["camera_id"] == "cam-1"
     assert kwargs["json"]["data"]["store_id"] == "store-1"
     assert kwargs["json"]["data"]["agent_id"] == "agent-1"
