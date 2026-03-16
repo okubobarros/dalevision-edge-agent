@@ -201,6 +201,10 @@ def check_for_update(
     rollout_start_local = str(rollout_window.get("start_local") or "02:00")
     rollout_end_local = str(rollout_window.get("end_local") or "05:00")
     rollout_tz = str(rollout_window.get("timezone") or "America/Sao_Paulo")
+    health_gate = payload.get("health_gate") if isinstance(payload.get("health_gate"), dict) else {}
+    health_max_boot_seconds = int(health_gate.get("max_boot_seconds") or 120)
+    health_require_heartbeat_seconds = int(health_gate.get("require_heartbeat_seconds") or 180)
+    health_require_camera_health_count = int(health_gate.get("require_camera_health_count") or 3)
     if not latest_version or not download_url:
         logger.info("UPD002 invalid update payload")
         return None
@@ -265,6 +269,11 @@ def check_for_update(
         "url": download_url,
         "sha256": checksum,
         "channel": channel,
+        "health_gate": {
+            "max_boot_seconds": health_max_boot_seconds,
+            "require_heartbeat_seconds": health_require_heartbeat_seconds,
+            "require_camera_health_count": health_require_camera_health_count,
+        },
         "store_id": store_id,
         "agent_id": agent_id,
         "auto_apply": True,
@@ -370,6 +379,7 @@ def apply_update_if_possible(
         "to": update["version"],
         "channel": update.get("channel") or "stable",
         "downloaded": str(downloaded_path),
+        "health_gate": update.get("health_gate") or {},
     }
     (Path.cwd() / "updates" / "pending.json").write_text(
         json.dumps(payload, indent=2),

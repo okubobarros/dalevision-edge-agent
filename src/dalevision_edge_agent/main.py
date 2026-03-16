@@ -304,6 +304,65 @@ def _load_pending_update_payload() -> dict[str, Any]:
         return {}
 
 
+def _run_post_update_health_gate(
+    *,
+    logger: logging.Logger,
+    settings,
+    version: str,
+    pending_payload: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    """
+    v1 health gate after update:
+    - require a successful heartbeat within configured timeout.
+    Camera-health threshold is recorded as pending when not yet measured in this stage.
+    """
+    gate = pending_payload.get("health_gate") if isinstance(pending_payload.get("health_gate"), dict) else {}
+    max_boot_seconds = int(gate.get("max_boot_seconds") or 120)
+    require_heartbeat_seconds = int(gate.get("require_heartbeat_seconds") or 180)
+    require_camera_health_count = int(gate.get("require_camera_health_count") or 3)
+    deadline = time.time() + max(5, min(max_boot_seconds, require_heartbeat_seconds))
+    heartbeat_ok = False
+    last_status = None
+    last_error = None
+    url = f"{settings.cloud_base_url}/api/edge/events/"
+
+    while time.time() < deadline:
+        ok, status_code, error = send_heartbeat(
+            url=url,
+            edge_token=settings.edge_token,
+            store_id=settings.store_id,
+            agent_id=settings.agent_id,
+            version=version,
+            timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            extra_data={},
+        )
+        last_status = status_code
+        last_error = error
+        if ok:
+            heartbeat_ok = True
+            break
+        time.sleep(3)
+
+    meta = {
+        "source": "boot_after_update",
+        "health_gate": {
+            "heartbeat_ok": heartbeat_ok,
+            "last_heartbeat_status": last_status,
+            "last_heartbeat_error": last_error,
+            "require_camera_health_count": require_camera_health_count,
+            "camera_health_gate_evaluated": False,
+        },
+    }
+    if not heartbeat_ok:
+        logger.error(
+            "UPD041 health gate failed heartbeat status=%s error=%s",
+            last_status,
+            last_error,
+        )
+        return False, meta
+    return True, meta
+
+
 def _setup_logging() -> logging.Logger:
     logger = logging.getLogger("dalevision-edge-agent")
     if logger.handlers:
@@ -966,6 +1025,33 @@ def main() -> int:
         pending_payload = _load_pending_update_payload()
         to_version = str(pending_payload.get("to") or "")
         channel = str(pending_payload.get("channel") or "stable")
+        health_ok, health_meta = _run_post_update_health_gate(
+            logger=logger,
+            settings=settings,
+            version=_get_version(),
+            pending_payload=pending_payload,
+        )
+        if not health_ok:
+            send_update_report(
+                logger=logger,
+                cloud_base_url=settings.cloud_base_url,
+                edge_token=settings.edge_token,
+                payload={
+                    "store_id": settings.store_id,
+                    "agent_id": settings.agent_id,
+                    "from_version": args.updated_from,
+                    "to_version": to_version or _get_version(),
+                    "channel": channel,
+                    "status": "failed",
+                    "phase": "health_check",
+                    "event": "edge_update_failed",
+                    "attempt": 1,
+                    "reason_code": "HEALTH_GATE_TIMEOUT",
+                    "meta": health_meta,
+                },
+            )
+            _rollback_update_if_needed(args.updated_from, logger)
+            return EXIT_NETWORK_ERROR
         send_update_report(
             logger=logger,
             cloud_base_url=settings.cloud_base_url,
@@ -980,7 +1066,7 @@ def main() -> int:
                 "phase": "health_check",
                 "event": "edge_update_healthy",
                 "attempt": 1,
-                "meta": {"source": "boot_after_update"},
+                "meta": health_meta,
             },
         )
         backup = Path(sys.argv[0]).with_suffix(".exe.bak")
