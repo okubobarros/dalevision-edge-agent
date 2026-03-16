@@ -378,6 +378,7 @@ def apply_update_if_possible(
         "from": current_version,
         "to": update["version"],
         "channel": update.get("channel") or "stable",
+        "attempt": int(update.get("attempt") or 1),
         "downloaded": str(downloaded_path),
         "health_gate": update.get("health_gate") or {},
     }

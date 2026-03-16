@@ -1025,6 +1025,7 @@ def main() -> int:
         pending_payload = _load_pending_update_payload()
         to_version = str(pending_payload.get("to") or "")
         channel = str(pending_payload.get("channel") or "stable")
+        update_attempt = int(pending_payload.get("attempt") or 1)
         health_ok, health_meta = _run_post_update_health_gate(
             logger=logger,
             settings=settings,
@@ -1045,7 +1046,7 @@ def main() -> int:
                     "status": "failed",
                     "phase": "health_check",
                     "event": "edge_update_failed",
-                    "attempt": 1,
+                    "attempt": update_attempt,
                     "reason_code": "HEALTH_GATE_TIMEOUT",
                     "meta": health_meta,
                 },
@@ -1065,7 +1066,7 @@ def main() -> int:
                 "status": "healthy",
                 "phase": "health_check",
                 "event": "edge_update_healthy",
-                "attempt": 1,
+                "attempt": update_attempt,
                 "meta": health_meta,
             },
         )
@@ -1081,6 +1082,7 @@ def main() -> int:
 
     url = f"{settings.cloud_base_url}/api/edge/events/"
     version = _get_version()
+    update_attempt_counter = 0
 
     vision_source = (os.getenv("VISION_SOURCE") or "rtsp").strip().lower()
     camera_sync_enabled_raw = os.getenv("CAMERA_SYNC_ENABLED")
@@ -1605,6 +1607,8 @@ def main() -> int:
                     agent_id=settings.agent_id,
                 )
                 if update and update.get("blocked_reason_code"):
+                    update_attempt_counter += 1
+                    blocked_attempt = update_attempt_counter
                     send_update_report(
                         logger=logger,
                         cloud_base_url=settings.cloud_base_url,
@@ -1618,12 +1622,15 @@ def main() -> int:
                             "status": "failed",
                             "phase": update.get("blocked_phase") or "policy_check",
                             "event": "edge_update_failed",
-                            "attempt": 1,
+                            "attempt": blocked_attempt,
                             "reason_code": update.get("blocked_reason_code"),
                             "reason_detail": update.get("blocked_detail"),
                         },
                     )
                 if update and update.get("auto_apply"):
+                    update_attempt_counter += 1
+                    update_attempt = update_attempt_counter
+                    update["attempt"] = update_attempt
                     lock_ok, lock_path, lock_reason = acquire_update_lock(
                         logger=logger,
                         version=str(update.get("version") or ""),
@@ -1642,7 +1649,7 @@ def main() -> int:
                                 "status": "failed",
                                 "phase": "policy_check",
                                 "event": "edge_update_failed",
-                                "attempt": 1,
+                                "attempt": update_attempt,
                                 "reason_code": lock_reason or "UPDATE_LOCKED",
                             },
                         )
@@ -1662,7 +1669,7 @@ def main() -> int:
                             "status": "started",
                             "phase": "policy_check",
                             "event": "edge_update_started",
-                            "attempt": 1,
+                            "attempt": update_attempt,
                         },
                     )
                     try:
@@ -1682,7 +1689,7 @@ def main() -> int:
                                     "status": "downloaded",
                                     "phase": "download",
                                     "event": "edge_update_downloaded",
-                                    "attempt": 1,
+                                    "attempt": update_attempt,
                                 },
                             )
                             send_update_report(
@@ -1698,7 +1705,7 @@ def main() -> int:
                                     "status": "verified",
                                     "phase": "checksum",
                                     "event": "edge_update_verified",
-                                    "attempt": 1,
+                                    "attempt": update_attempt,
                                 },
                             )
                             if service_mode:
@@ -1717,7 +1724,7 @@ def main() -> int:
                                         "status": "activated",
                                         "phase": "activation",
                                         "event": "edge_update_activated",
-                                        "attempt": 1,
+                                        "attempt": update_attempt,
                                     },
                                 )
                                 if apply_update_if_possible(
@@ -1740,7 +1747,7 @@ def main() -> int:
                                         "status": "failed",
                                         "phase": "activation",
                                         "event": "edge_update_failed",
-                                        "attempt": 1,
+                                        "attempt": update_attempt,
                                         "reason_code": "ACTIVATION_FAILED",
                                     },
                                 )
@@ -1758,7 +1765,7 @@ def main() -> int:
                                     "status": "failed",
                                     "phase": "download",
                                     "event": "edge_update_failed",
-                                    "attempt": 1,
+                                    "attempt": update_attempt,
                                     "reason_code": "DOWNLOAD_FAILED",
                                 },
                             )

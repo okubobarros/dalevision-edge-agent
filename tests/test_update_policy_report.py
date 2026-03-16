@@ -2,6 +2,7 @@ from unittest.mock import Mock, patch
 
 from dalevision_edge_agent.update import (
     acquire_update_lock,
+    apply_update_if_possible,
     check_for_update,
     release_update_lock,
     send_update_report,
@@ -229,3 +230,38 @@ def test_send_update_report_missing_config():
     assert ok is False
     assert status is None
     assert "missing_cloud_base_url_or_edge_token" in str(error)
+
+
+@patch("dalevision_edge_agent.update.subprocess.Popen")
+def test_apply_update_persists_attempt_in_pending_payload(mock_popen: Mock, tmp_path, monkeypatch):
+    monkeypatch.setattr("dalevision_edge_agent.update.Path.cwd", lambda: tmp_path)
+    monkeypatch.setattr("dalevision_edge_agent.update.subprocess.CREATE_NEW_CONSOLE", 0, raising=False)
+
+    executable = tmp_path / "agent.exe"
+    executable.write_bytes(b"old-binary")
+    downloaded = tmp_path / "downloaded.exe"
+    downloaded.write_bytes(b"new-binary")
+    (tmp_path / "updates").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr("dalevision_edge_agent.update.sys.argv", [str(executable)])
+
+    logger = Mock()
+    ok = apply_update_if_possible(
+        logger=logger,
+        current_version="1.4.1",
+        update={
+            "version": "1.4.2",
+            "channel": "canary",
+            "attempt": 7,
+            "health_gate": {"max_boot_seconds": 120},
+        },
+        downloaded_path=downloaded,
+    )
+
+    assert ok is True
+    assert mock_popen.called is True
+
+    pending_path = tmp_path / "updates" / "pending.json"
+    assert pending_path.exists()
+    pending = __import__("json").loads(pending_path.read_text(encoding="utf-8"))
+    assert pending["attempt"] == 7
+    assert pending["to"] == "1.4.2"
