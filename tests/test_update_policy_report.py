@@ -1,6 +1,10 @@
 from unittest.mock import Mock, patch
 
-from dalevision_edge_agent.update import check_for_update, send_update_report
+from dalevision_edge_agent.update import (
+    check_for_update,
+    send_update_report,
+    _build_update_report_idempotency_key,
+)
 
 
 @patch("dalevision_edge_agent.update.requests.get")
@@ -80,6 +84,52 @@ def test_send_update_report_success(mock_post: Mock):
     assert ok is True
     assert status == 201
     assert error is None
+    _, kwargs = mock_post.call_args
+    assert "idempotency_key" in kwargs["json"]
+    assert kwargs["json"]["idempotency_key"]
+
+
+@patch("dalevision_edge_agent.update.requests.post")
+def test_send_update_report_preserves_custom_idempotency_key(mock_post: Mock):
+    mock_post.return_value = Mock(status_code=201, json=lambda: {"ok": True})
+    logger = Mock()
+    ok, status, error = send_update_report(
+        logger=logger,
+        cloud_base_url="https://api.example.com",
+        edge_token="tok_123",
+        payload={
+            "store_id": "store-1",
+            "agent_id": "edge-1",
+            "event": "edge_update_started",
+            "status": "started",
+            "idempotency_key": "custom-key-001",
+        },
+    )
+    assert ok is True
+    assert status == 201
+    assert error is None
+    _, kwargs = mock_post.call_args
+    assert kwargs["json"]["idempotency_key"] == "custom-key-001"
+
+
+def test_build_update_report_idempotency_key_is_stable_without_timestamp():
+    payload_a = {
+        "store_id": "store-1",
+        "agent_id": "edge-1",
+        "from_version": "1.4.1",
+        "to_version": "1.4.2",
+        "channel": "stable",
+        "event": "edge_update_healthy",
+        "status": "healthy",
+        "phase": "health_check",
+        "attempt": 1,
+        "timestamp": "2026-03-16T12:00:00Z",
+    }
+    payload_b = dict(payload_a)
+    payload_b["timestamp"] = "2026-03-16T12:00:03Z"
+    key_a = _build_update_report_idempotency_key(payload_a)
+    key_b = _build_update_report_idempotency_key(payload_b)
+    assert key_a == key_b
 
 
 def test_send_update_report_missing_config():

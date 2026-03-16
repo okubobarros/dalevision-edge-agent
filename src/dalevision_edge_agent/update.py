@@ -39,6 +39,27 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _build_update_report_idempotency_key(payload: dict[str, Any]) -> str:
+    """
+    Stable key for dedupe on backend update-report.
+    Must not include timestamp to remain stable across retries.
+    """
+    base = {
+        "store_id": payload.get("store_id"),
+        "agent_id": payload.get("agent_id"),
+        "from_version": payload.get("from_version"),
+        "to_version": payload.get("to_version"),
+        "channel": payload.get("channel"),
+        "event": payload.get("event"),
+        "status": payload.get("status"),
+        "phase": payload.get("phase"),
+        "attempt": payload.get("attempt") or 1,
+        "reason_code": payload.get("reason_code"),
+    }
+    raw = json.dumps(base, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
 def check_for_update(
     *,
     logger: logging.Logger,
@@ -125,8 +146,11 @@ def send_update_report(
         return False, None, "missing_cloud_base_url_or_edge_token"
     url = f"{cloud_base_url.rstrip('/')}{UPDATE_REPORT_ENDPOINT}"
     headers = build_auth_headers(edge_token)
+    payload_to_send = dict(payload)
+    if not payload_to_send.get("idempotency_key"):
+        payload_to_send["idempotency_key"] = _build_update_report_idempotency_key(payload_to_send)
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        response = requests.post(url, json=payload_to_send, headers=headers, timeout=10)
         ok = 200 <= response.status_code < 300
         if ok:
             return True, response.status_code, None
