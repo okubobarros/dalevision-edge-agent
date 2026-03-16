@@ -1,7 +1,9 @@
 from unittest.mock import Mock, patch
 
 from dalevision_edge_agent.update import (
+    acquire_update_lock,
     check_for_update,
+    release_update_lock,
     send_update_report,
     _build_update_report_idempotency_key,
 )
@@ -14,6 +16,7 @@ def test_check_for_update_uses_policy_endpoint(mock_get: Mock):
         json=lambda: {
             "channel": "canary",
             "target_version": "1.4.2",
+            "rollout_window": {"start_local": "00:00", "end_local": "23:59", "timezone": "UTC"},
             "package": {
                 "url": "https://cdn.example.com/edge-1.4.2.zip",
                 "sha256": "abc123",
@@ -130,6 +133,89 @@ def test_build_update_report_idempotency_key_is_stable_without_timestamp():
     key_a = _build_update_report_idempotency_key(payload_a)
     key_b = _build_update_report_idempotency_key(payload_b)
     assert key_a == key_b
+
+
+@patch("dalevision_edge_agent.update.requests.get")
+def test_check_for_update_blocks_when_min_supported_not_met(mock_get: Mock):
+    mock_get.return_value = Mock(
+        status_code=200,
+        json=lambda: {
+            "channel": "stable",
+            "target_version": "1.4.2",
+            "current_min_supported": "1.4.0",
+            "rollout_window": {"start_local": "00:00", "end_local": "23:59", "timezone": "UTC"},
+            "package": {
+                "url": "https://cdn.example.com/edge-1.4.2.zip",
+                "sha256": "abc123",
+            },
+        },
+    )
+    logger = Mock()
+    result = check_for_update(
+        logger=logger,
+        current_version="1.3.9",
+        update_check_url="",
+        auto_update_enabled=True,
+        cloud_base_url="https://api.example.com",
+        edge_token="tok_123",
+        store_id="store-1",
+        agent_id="edge-1",
+    )
+    assert result is not None
+    assert result["auto_apply"] is False
+    assert result["blocked_reason_code"] == "UNSUPPORTED_VERSION"
+
+
+@patch("dalevision_edge_agent.update._is_within_rollout_window", return_value=False)
+@patch("dalevision_edge_agent.update.requests.get")
+def test_check_for_update_blocks_outside_rollout_window(mock_get: Mock, _mock_window: Mock):
+    mock_get.return_value = Mock(
+        status_code=200,
+        json=lambda: {
+            "channel": "stable",
+            "target_version": "1.4.2",
+            "rollout_window": {"start_local": "02:00", "end_local": "05:00", "timezone": "America/Sao_Paulo"},
+            "package": {
+                "url": "https://cdn.example.com/edge-1.4.2.zip",
+                "sha256": "abc123",
+            },
+        },
+    )
+    logger = Mock()
+    result = check_for_update(
+        logger=logger,
+        current_version="1.4.1",
+        update_check_url="",
+        auto_update_enabled=True,
+        cloud_base_url="https://api.example.com",
+        edge_token="tok_123",
+        store_id="store-1",
+        agent_id="edge-1",
+    )
+    assert result is not None
+    assert result["auto_apply"] is False
+    assert result["blocked_reason_code"] == "ROLLOUT_WINDOW_CLOSED"
+
+
+def test_update_lock_acquire_release(tmp_path):
+    logger = Mock()
+    with patch("dalevision_edge_agent.update.Path.cwd", return_value=tmp_path):
+        ok1, lock_path, reason1 = acquire_update_lock(logger=logger, version="1.5.0")
+        assert ok1 is True
+        assert reason1 is None
+        assert lock_path is not None and lock_path.exists()
+
+        ok2, _, reason2 = acquire_update_lock(logger=logger, version="1.5.0")
+        assert ok2 is False
+        assert reason2 == "UPDATE_LOCKED"
+
+        release_update_lock(logger=logger, lock_path=lock_path)
+        assert not lock_path.exists()
+
+        ok3, lock_path2, reason3 = acquire_update_lock(logger=logger, version="1.5.0")
+        assert ok3 is True
+        assert reason3 is None
+        release_update_lock(logger=logger, lock_path=lock_path2)
 
 
 def test_send_update_report_missing_config():

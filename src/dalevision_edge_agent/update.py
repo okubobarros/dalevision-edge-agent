@@ -3,18 +3,22 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import requests
 from .cameras import build_auth_headers
 
 UPDATE_POLICY_ENDPOINT = "/api/edge/update-policy/"
 UPDATE_REPORT_ENDPOINT = "/api/edge/update-report/"
+UPDATE_LOCK_FILE = "update.lock"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -26,6 +30,48 @@ def _version_tuple(value: str) -> tuple[int, ...]:
 
 def _is_newer(current: str, incoming: str) -> bool:
     return _version_tuple(incoming) > _version_tuple(current)
+
+
+def _is_version_supported(current: str, min_supported: str) -> bool:
+    if not min_supported:
+        return True
+    return _version_tuple(current) >= _version_tuple(min_supported)
+
+
+def _parse_hhmm(value: str) -> tuple[int, int] | None:
+    if not value or ":" not in value:
+        return None
+    try:
+        hh, mm = value.split(":", 1)
+        h = int(hh)
+        m = int(mm)
+        if h < 0 or h > 23 or m < 0 or m > 59:
+            return None
+        return h, m
+    except Exception:
+        return None
+
+
+def _is_within_rollout_window(start_local: str, end_local: str, tz_name: str) -> bool:
+    parsed_start = _parse_hhmm(start_local)
+    parsed_end = _parse_hhmm(end_local)
+    if not parsed_start or not parsed_end:
+        # invalid policy window: fail-open to avoid bricking updates.
+        return True
+    try:
+        now_local = datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        now_local = datetime.utcnow()
+    now_m = now_local.hour * 60 + now_local.minute
+    start_m = parsed_start[0] * 60 + parsed_start[1]
+    end_m = parsed_end[0] * 60 + parsed_end[1]
+
+    if start_m == end_m:
+        return True
+    if start_m < end_m:
+        return start_m <= now_m <= end_m
+    # overnight window (e.g., 23:00 -> 03:00)
+    return now_m >= start_m or now_m <= end_m
 
 
 def _sha256_file(path: Path) -> str:
@@ -58,6 +104,52 @@ def _build_update_report_idempotency_key(payload: dict[str, Any]) -> str:
     }
     raw = json.dumps(base, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def acquire_update_lock(*, logger: logging.Logger, version: str, ttl_seconds: int = 1800) -> tuple[bool, Optional[Path], Optional[str]]:
+    updates_dir = Path.cwd() / "updates"
+    updates_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = updates_dir / UPDATE_LOCK_FILE
+
+    if lock_path.exists():
+        try:
+            payload = json.loads(lock_path.read_text(encoding="utf-8"))
+            created_at = int(payload.get("created_at_epoch", 0))
+            age = max(0, int(time.time()) - created_at)
+            if created_at and age <= ttl_seconds:
+                return False, None, "UPDATE_LOCKED"
+        except Exception:
+            # unknown lock format; treat as stale and replace.
+            pass
+        try:
+            lock_path.unlink(missing_ok=True)
+        except Exception:
+            return False, None, "UPDATE_LOCKED"
+
+    payload = {
+        "pid": os.getpid(),
+        "version": version,
+        "created_at_epoch": int(time.time()),
+    }
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        return True, lock_path, None
+    except FileExistsError:
+        return False, None, "UPDATE_LOCKED"
+    except Exception as exc:
+        logger.info("UPD013 lock create failed: %s", exc)
+        return False, None, "UPDATE_LOCKED"
+
+
+def release_update_lock(*, logger: logging.Logger, lock_path: Optional[Path]) -> None:
+    if not lock_path:
+        return
+    try:
+        lock_path.unlink(missing_ok=True)
+    except Exception as exc:
+        logger.info("UPD014 lock cleanup failed: %s", exc)
 
 
 def check_for_update(
@@ -104,12 +196,56 @@ def check_for_update(
     download_url = str(package.get("url") or payload.get("url") or "")
     checksum = str(package.get("sha256") or payload.get("sha256") or "")
     channel = str(payload.get("channel") or "stable")
+    current_min_supported = str(payload.get("current_min_supported") or "").strip()
+    rollout_window = payload.get("rollout_window") if isinstance(payload.get("rollout_window"), dict) else {}
+    rollout_start_local = str(rollout_window.get("start_local") or "02:00")
+    rollout_end_local = str(rollout_window.get("end_local") or "05:00")
+    rollout_tz = str(rollout_window.get("timezone") or "America/Sao_Paulo")
     if not latest_version or not download_url:
         logger.info("UPD002 invalid update payload")
         return None
 
     if not _is_newer(current_version, latest_version):
         return None
+
+    if not _is_version_supported(current_version, current_min_supported):
+        logger.info(
+            "UPD015 update blocked unsupported current=%s min_supported=%s",
+            current_version,
+            current_min_supported,
+        )
+        return {
+            "version": latest_version,
+            "url": download_url,
+            "sha256": checksum,
+            "channel": channel,
+            "store_id": store_id,
+            "agent_id": agent_id,
+            "auto_apply": False,
+            "blocked_reason_code": "UNSUPPORTED_VERSION",
+            "blocked_phase": "policy_check",
+            "blocked_detail": f"current_version={current_version} below min_supported={current_min_supported}",
+        }
+
+    if not _is_within_rollout_window(rollout_start_local, rollout_end_local, rollout_tz):
+        logger.info(
+            "UPD016 update blocked outside window now_tz=%s window=%s-%s",
+            rollout_tz,
+            rollout_start_local,
+            rollout_end_local,
+        )
+        return {
+            "version": latest_version,
+            "url": download_url,
+            "sha256": checksum,
+            "channel": channel,
+            "store_id": store_id,
+            "agent_id": agent_id,
+            "auto_apply": False,
+            "blocked_reason_code": "ROLLOUT_WINDOW_CLOSED",
+            "blocked_phase": "policy_check",
+            "blocked_detail": f"window={rollout_start_local}-{rollout_end_local} tz={rollout_tz}",
+        }
 
     logger.info("UPD010 update available: %s", latest_version)
     if not auto_update_enabled:
