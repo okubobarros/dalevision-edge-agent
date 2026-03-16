@@ -35,7 +35,7 @@ from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_s
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import run_scan
-from .update import apply_update_if_possible, check_for_update, download_update
+from .update import apply_update_if_possible, check_for_update, download_update, send_update_report
 from .vision.worker import VisionWorker
 
 BACKOFF_SECONDS = [2, 5, 10, 20, 30]
@@ -285,6 +285,16 @@ def _rollback_update_if_needed(updated_from: str, logger: logging.Logger) -> Non
         logger.error("UPD050 rollback aplicado (from=%s)", updated_from)
     except Exception as exc:
         logger.error("UPD051 rollback falhou: %s", exc)
+
+
+def _load_pending_update_payload() -> dict[str, Any]:
+    pending = Path.cwd() / "updates" / "pending.json"
+    if not pending.exists():
+        return {}
+    try:
+        return json.loads(pending.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def _setup_logging() -> logging.Logger:
@@ -946,6 +956,26 @@ def main() -> int:
     logger.info("Logs at %s", next(iter(logger.handlers)).baseFilename)
 
     if args.updated_from:
+        pending_payload = _load_pending_update_payload()
+        to_version = str(pending_payload.get("to") or "")
+        channel = str(pending_payload.get("channel") or "stable")
+        send_update_report(
+            logger=logger,
+            cloud_base_url=settings.cloud_base_url,
+            edge_token=settings.edge_token,
+            payload={
+                "store_id": settings.store_id,
+                "agent_id": settings.agent_id,
+                "from_version": args.updated_from,
+                "to_version": to_version or _get_version(),
+                "channel": channel,
+                "status": "healthy",
+                "phase": "health_check",
+                "event": "edge_update_healthy",
+                "attempt": 1,
+                "meta": {"source": "boot_after_update"},
+            },
+        )
         backup = Path(sys.argv[0]).with_suffix(".exe.bak")
         pending = Path.cwd() / "updates" / "pending.json"
         if backup.exists():
@@ -1476,14 +1506,82 @@ def main() -> int:
                     current_version=version,
                     update_check_url=settings.update_check_url,
                     auto_update_enabled=settings.auto_update_enabled,
+                    cloud_base_url=settings.cloud_base_url,
+                    edge_token=settings.edge_token,
+                    store_id=settings.store_id,
+                    agent_id=settings.agent_id,
                 )
                 if update and update.get("auto_apply"):
+                    send_update_report(
+                        logger=logger,
+                        cloud_base_url=settings.cloud_base_url,
+                        edge_token=settings.edge_token,
+                        payload={
+                            "store_id": settings.store_id,
+                            "agent_id": settings.agent_id,
+                            "from_version": version,
+                            "to_version": update.get("version"),
+                            "channel": update.get("channel") or "stable",
+                            "status": "started",
+                            "phase": "policy_check",
+                            "event": "edge_update_started",
+                            "attempt": 1,
+                        },
+                    )
                     service_mode = os.getenv("SERVICE_MODE") or os.getenv("DALE_SERVICE_MODE")
                     downloaded = download_update(logger=logger, update=update)
                     if downloaded:
+                        send_update_report(
+                            logger=logger,
+                            cloud_base_url=settings.cloud_base_url,
+                            edge_token=settings.edge_token,
+                            payload={
+                                "store_id": settings.store_id,
+                                "agent_id": settings.agent_id,
+                                "from_version": version,
+                                "to_version": update.get("version"),
+                                "channel": update.get("channel") or "stable",
+                                "status": "downloaded",
+                                "phase": "download",
+                                "event": "edge_update_downloaded",
+                                "attempt": 1,
+                            },
+                        )
+                        send_update_report(
+                            logger=logger,
+                            cloud_base_url=settings.cloud_base_url,
+                            edge_token=settings.edge_token,
+                            payload={
+                                "store_id": settings.store_id,
+                                "agent_id": settings.agent_id,
+                                "from_version": version,
+                                "to_version": update.get("version"),
+                                "channel": update.get("channel") or "stable",
+                                "status": "verified",
+                                "phase": "checksum",
+                                "event": "edge_update_verified",
+                                "attempt": 1,
+                            },
+                        )
                         if service_mode:
                             logger.info("UPD012 update scheduled (service mode)")
                         else:
+                            send_update_report(
+                                logger=logger,
+                                cloud_base_url=settings.cloud_base_url,
+                                edge_token=settings.edge_token,
+                                payload={
+                                    "store_id": settings.store_id,
+                                    "agent_id": settings.agent_id,
+                                    "from_version": version,
+                                    "to_version": update.get("version"),
+                                    "channel": update.get("channel") or "stable",
+                                    "status": "activated",
+                                    "phase": "activation",
+                                    "event": "edge_update_activated",
+                                    "attempt": 1,
+                                },
+                            )
                             if apply_update_if_possible(
                                 logger=logger,
                                 current_version=version,
@@ -1491,6 +1589,41 @@ def main() -> int:
                                 downloaded_path=downloaded,
                             ):
                                 return 0
+                            send_update_report(
+                                logger=logger,
+                                cloud_base_url=settings.cloud_base_url,
+                                edge_token=settings.edge_token,
+                                payload={
+                                    "store_id": settings.store_id,
+                                    "agent_id": settings.agent_id,
+                                    "from_version": version,
+                                    "to_version": update.get("version"),
+                                    "channel": update.get("channel") or "stable",
+                                    "status": "failed",
+                                    "phase": "activation",
+                                    "event": "edge_update_failed",
+                                    "attempt": 1,
+                                    "reason_code": "ACTIVATION_FAILED",
+                                },
+                            )
+                    else:
+                        send_update_report(
+                            logger=logger,
+                            cloud_base_url=settings.cloud_base_url,
+                            edge_token=settings.edge_token,
+                            payload={
+                                "store_id": settings.store_id,
+                                "agent_id": settings.agent_id,
+                                "from_version": version,
+                                "to_version": update.get("version"),
+                                "channel": update.get("channel") or "stable",
+                                "status": "failed",
+                                "phase": "download",
+                                "event": "edge_update_failed",
+                                "attempt": 1,
+                                "reason_code": "DOWNLOAD_FAILED",
+                            },
+                        )
                 last_update_check_at = now
             time.sleep(settings.heartbeat_interval_seconds)
             continue

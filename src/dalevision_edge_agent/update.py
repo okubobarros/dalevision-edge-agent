@@ -11,6 +11,10 @@ import time
 from typing import Any, Optional
 
 import requests
+from .cameras import build_auth_headers
+
+UPDATE_POLICY_ENDPOINT = "/api/edge/update-policy/"
+UPDATE_REPORT_ENDPOINT = "/api/edge/update-report/"
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -41,22 +45,44 @@ def check_for_update(
     current_version: str,
     update_check_url: str,
     auto_update_enabled: bool,
+    cloud_base_url: str = "",
+    edge_token: str = "",
+    store_id: str = "",
+    agent_id: str = "",
 ) -> Optional[dict[str, Any]]:
-    if not update_check_url:
-        return None
-    try:
-        response = requests.get(update_check_url, timeout=8)
-        if response.status_code != 200:
-            logger.info("UPD001 update check status=%s", response.status_code)
-            return None
-        payload = response.json()
-    except Exception as exc:
-        logger.info("UPD001 update check failed: %s", exc)
-        return None
+    payload = None
+    if cloud_base_url and edge_token:
+        policy_url = f"{cloud_base_url.rstrip('/')}{UPDATE_POLICY_ENDPOINT}"
+        headers = build_auth_headers(edge_token)
+        if agent_id:
+            headers["X-AGENT-ID"] = agent_id
+        try:
+            response = requests.get(policy_url, headers=headers, timeout=8)
+            if response.status_code == 200:
+                payload = response.json()
+            else:
+                logger.info("UPD001 policy check status=%s", response.status_code)
+        except Exception as exc:
+            logger.info("UPD001 policy check failed: %s", exc)
 
-    latest_version = str(payload.get("version") or "")
-    download_url = str(payload.get("url") or "")
-    checksum = str(payload.get("sha256") or "")
+    if payload is None:
+        if not update_check_url:
+            return None
+        try:
+            response = requests.get(update_check_url, timeout=8)
+            if response.status_code != 200:
+                logger.info("UPD001 update check status=%s", response.status_code)
+                return None
+            payload = response.json()
+        except Exception as exc:
+            logger.info("UPD001 update check failed: %s", exc)
+            return None
+
+    package = payload.get("package") if isinstance(payload.get("package"), dict) else payload
+    latest_version = str(payload.get("target_version") or payload.get("version") or "")
+    download_url = str(package.get("url") or payload.get("url") or "")
+    checksum = str(package.get("sha256") or payload.get("sha256") or "")
+    channel = str(payload.get("channel") or "stable")
     if not latest_version or not download_url:
         logger.info("UPD002 invalid update payload")
         return None
@@ -71,6 +97,9 @@ def check_for_update(
             "version": latest_version,
             "url": download_url,
             "sha256": checksum,
+            "channel": channel,
+            "store_id": store_id,
+            "agent_id": agent_id,
             "auto_apply": False,
         }
 
@@ -78,8 +107,38 @@ def check_for_update(
         "version": latest_version,
         "url": download_url,
         "sha256": checksum,
+        "channel": channel,
+        "store_id": store_id,
+        "agent_id": agent_id,
         "auto_apply": True,
     }
+
+
+def send_update_report(
+    *,
+    logger: logging.Logger,
+    cloud_base_url: str,
+    edge_token: str,
+    payload: dict[str, Any],
+) -> tuple[bool, Optional[int], Optional[str]]:
+    if not cloud_base_url or not edge_token:
+        return False, None, "missing_cloud_base_url_or_edge_token"
+    url = f"{cloud_base_url.rstrip('/')}{UPDATE_REPORT_ENDPOINT}"
+    headers = build_auth_headers(edge_token)
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=10)
+        ok = 200 <= response.status_code < 300
+        if ok:
+            return True, response.status_code, None
+        detail = None
+        try:
+            detail = response.json()
+        except Exception:
+            detail = response.text.strip()[:500] if response.text else None
+        return False, response.status_code, f"HTTP {response.status_code}: {detail}"
+    except Exception as exc:
+        logger.info("UPD050 update report failed: %s", exc)
+        return False, None, str(exc)
 
 
 def download_update(
@@ -149,6 +208,7 @@ def apply_update_if_possible(
     payload = {
         "from": current_version,
         "to": update["version"],
+        "channel": update.get("channel") or "stable",
         "downloaded": str(downloaded_path),
     }
     (Path.cwd() / "updates" / "pending.json").write_text(
@@ -164,7 +224,7 @@ def apply_update_if_possible(
                 f"if exist \"{backup}\" del /f /q \"{backup}\"",
                 f"move /y \"{executable}\" \"{backup}\"",
                 f"move /y \"{downloaded_path}\" \"{executable}\"",
-                f"start \"\" \"{executable}\" --updated-from {update['version']}",
+                f"start \"\" \"{executable}\" --updated-from {current_version}",
                 "exit /b 0",
             ]
         ),
