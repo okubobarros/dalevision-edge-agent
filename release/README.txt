@@ -6,9 +6,8 @@ PASSO 1: CONFIGURAR
 
 PASSO 2: TESTE RAPIDO
 1) Execute 01_TESTE_RAPIDO.bat (nao precisa admin).
-2) Verifique "Loaded env OK" e heartbeats.
+2) O script envia um heartbeat unico e encerra automaticamente.
 3) Verifique "status=201" em logs\agent.log.
-4) Para parar, feche a janela do teste rapido.
 
 PASSO 3: INSTALAR AUTOSTART
 1) Execute 02_INSTALAR_AUTOSTART.bat (nao precisa admin).

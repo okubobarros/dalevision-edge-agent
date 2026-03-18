@@ -54,11 +54,11 @@ if not exist "%EXE_NAME%" (
 
 echo Logs: %LOG_FILE%
 echo.
-echo Iniciando teste rapido (foreground).
-echo Feche esta janela para parar.
+echo Iniciando teste rapido (heartbeat unico).
+echo A janela fecha apos validar conexao.
 echo.
 
-"%EXE_NAME%"
+"%EXE_NAME%" --once
 set "exit_code=%errorlevel%"
 
 echo.
@@ -66,7 +66,7 @@ if not "%exit_code%"=="0" (
   echo O agente foi encerrado com erro (exit_code=%exit_code%).
   echo Rode Diagnose.bat e envie o ZIP para o suporte.
 ) else (
-  echo O agente foi encerrado.
+  echo Conexao validada com sucesso.
 )
 echo.
 pause
