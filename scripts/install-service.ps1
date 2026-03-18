@@ -189,6 +189,60 @@ function Get-CurrentUserId {
   return $env:USERNAME
 }
 
+function Parse-BoolEnv {
+  param(
+    [string]$Raw,
+    [bool]$Default = $false
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Raw)) {
+    return $Default
+  }
+
+  switch ($Raw.Trim().ToLowerInvariant()) {
+    "1" { return $true }
+    "true" { return $true }
+    "yes" { return $true }
+    "on" { return $true }
+    "0" { return $false }
+    "false" { return $false }
+    "no" { return $false }
+    "off" { return $false }
+    default { return $Default }
+  }
+}
+
+function Get-AutoUpdateEnabled {
+  param([hashtable]$EnvVars)
+
+  foreach ($key in @("AUTO_UPDATE_ENABLED", "ENABLE_AUTO_UPDATE")) {
+    $raw = $EnvVars[$key]
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      continue
+    }
+    return (Parse-BoolEnv -Raw $raw -Default $false)
+  }
+
+  # Default profissional: ligado quando nao houver opt-out explicito.
+  return $true
+}
+
+function Remove-TaskIfExists {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Name
+  )
+
+  $queryResult = Invoke-Schtasks -SchtasksArgs @("/Query", "/TN", $Name) -AllowNotFound
+  if ($queryResult.NotFound) {
+    Write-Log "UPDATE: tarefa '$Name' inexistente (nada para remover)."
+    return
+  }
+
+  Invoke-Schtasks -SchtasksArgs @("/Delete", "/F", "/TN", $Name) | Out-Null
+  Write-Log "UPDATE: tarefa '$Name' removida."
+}
+
 function Get-StartupTaskEnabled {
   param(
     [hashtable]$EnvVars,
@@ -466,14 +520,17 @@ function Invoke-InstallService {
     }
 
     $updateScript = Join-Path $installRoot "scripts\update.ps1"
-    $autoEnabled = ($envVars["AUTO_UPDATE_ENABLED"] -eq "1")
+    $autoEnabled = Get-AutoUpdateEnabled -EnvVars $envVars
     $repo = $envVars["UPDATE_GITHUB_REPO"]
 
     if (-not (Test-Path $updateScript)) {
       Write-Log "UPDATE: update.ps1 nao encontrado. Pulando tarefa de update."
-    } elseif (-not $autoEnabled -or [string]::IsNullOrWhiteSpace($repo)) {
-      Write-Log "UPDATE: auto-update desabilitado (AUTO_UPDATE_ENABLED=1 e UPDATE_GITHUB_REPO)."
-      # Nao consulta/remove task de update quando auto-update esta desabilitado.
+    } elseif ([string]::IsNullOrWhiteSpace($repo)) {
+      Write-Log "UPDATE: UPDATE_GITHUB_REPO ausente. Removendo tarefa de update (se existir)."
+      Remove-TaskIfExists -Name $UpdateTaskName
+    } elseif (-not $autoEnabled) {
+      Write-Log "UPDATE: auto-update desabilitado por .env. Removendo tarefa de update (se existir)."
+      Remove-TaskIfExists -Name $UpdateTaskName
     } else {
       $intervalHours = Get-UpdateIntervalHours -EnvVars $envVars
       $updateCmd = Get-UpdateTaskCommand -InstallRoot $installRoot

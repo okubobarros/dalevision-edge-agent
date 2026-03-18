@@ -40,6 +40,44 @@ function Read-EnvFile {
   return $result
 }
 
+function Parse-BoolEnv {
+  param(
+    [string]$Raw,
+    [bool]$Default = $false
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Raw)) {
+    return $Default
+  }
+
+  switch ($Raw.Trim().ToLowerInvariant()) {
+    "1" { return $true }
+    "true" { return $true }
+    "yes" { return $true }
+    "on" { return $true }
+    "0" { return $false }
+    "false" { return $false }
+    "no" { return $false }
+    "off" { return $false }
+    default { return $Default }
+  }
+}
+
+function Get-AutoUpdateEnabled {
+  param([hashtable]$EnvVars)
+
+  foreach ($key in @("AUTO_UPDATE_ENABLED", "ENABLE_AUTO_UPDATE")) {
+    $raw = $EnvVars[$key]
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      continue
+    }
+    return (Parse-BoolEnv -Raw $raw -Default $false)
+  }
+
+  # Default profissional: ligado sem opt-out explicito.
+  return $true
+}
+
 function Get-CurrentVersion {
   param(
     [string]$InstallRoot,
@@ -145,7 +183,7 @@ try {
   $envPath = Join-Path $installRoot ".env"
   $envVars = Read-EnvFile -Path $envPath
 
-  $autoEnabled = ($envVars["AUTO_UPDATE_ENABLED"] -eq "1")
+  $autoEnabled = Get-AutoUpdateEnabled -EnvVars $envVars
   $channel = $envVars["UPDATE_CHANNEL"]
   if ([string]::IsNullOrWhiteSpace($channel)) { $channel = "stable" }
   $repo = $envVars["UPDATE_GITHUB_REPO"]
@@ -195,7 +233,7 @@ try {
 
   Write-Log "UPD010 update encontrado: $latestVersion ($($asset.name))"
   if (-not $autoEnabled) {
-    Write-Log "UPD011 auto-update desabilitado (AUTO_UPDATE_ENABLED=1 para aplicar)."
+    Write-Log "UPD011 auto-update desabilitado por .env (AUTO_UPDATE_ENABLED=0)."
     exit 0
   }
 

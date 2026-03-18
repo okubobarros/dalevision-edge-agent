@@ -253,7 +253,7 @@ def check_for_update(
 
     logger.info("UPD010 update available: %s", latest_version)
     if not auto_update_enabled:
-        logger.info("UPD011 auto-update disabled; configure AUTO_UPDATE_ENABLED=1")
+        logger.info("UPD011 auto-update disabled by env (AUTO_UPDATE_ENABLED=0)")
         return {
             "version": latest_version,
             "url": download_url,

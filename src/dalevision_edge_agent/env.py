@@ -255,7 +255,8 @@ def load_settings() -> Settings:
         "UPDATE_INTERVAL_SECONDS",
         DEFAULT_UPDATE_INTERVAL_SECONDS,
     )
-    auto_update_enabled = _parse_bool_env("AUTO_UPDATE_ENABLED", False) or _parse_bool_env(
+    # Default profissional: auto-update ligado sem necessidade de toggle local.
+    auto_update_enabled = _parse_bool_env("AUTO_UPDATE_ENABLED", True) or _parse_bool_env(
         "ENABLE_AUTO_UPDATE",
         False,
     )

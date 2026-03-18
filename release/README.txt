@@ -28,7 +28,8 @@ PASSO 6: PARAR AGENTE E LIBERAR PASTA
 
 IMPORTANTE
 - Nao clique em arquivos .ps1 dentro de scripts\.
-- Auto-update vem desativado por padrao (AUTO_UPDATE_ENABLED=0).
+- Auto-update vem ativado por padrao (AUTO_UPDATE_ENABLED=1).
+- Para desativar explicitamente, use AUTO_UPDATE_ENABLED=0 no .env.
 
 ARQUIVOS NO ZIP
 - dalevision-edge-agent.exe
@@ -45,10 +46,9 @@ ARQUIVOS NO ZIP
 
 UPDATE (MVP)
 1) Configure no .env:
-   - AUTO_UPDATE_ENABLED=1
    - UPDATE_GITHUB_REPO=org/repo
    - UPDATE_INTERVAL_SECONDS=21600
-2) Reinstale o autostart para criar a tarefa de update.
+2) Reinstale o autostart para criar/atualizar a tarefa de update.
 3) Logs do update: logs\update.log.
 
 DIAGNOSTICO

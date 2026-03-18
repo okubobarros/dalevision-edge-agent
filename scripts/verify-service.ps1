@@ -29,6 +29,54 @@ function Read-EnvFile {
   return $result
 }
 
+function Parse-BoolEnv {
+  param(
+    [string]$Raw,
+    [bool]$Default = $false
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Raw)) {
+    return $Default
+  }
+
+  switch ($Raw.Trim().ToLowerInvariant()) {
+    "1" { return $true }
+    "true" { return $true }
+    "yes" { return $true }
+    "on" { return $true }
+    "0" { return $false }
+    "false" { return $false }
+    "no" { return $false }
+    "off" { return $false }
+    default { return $Default }
+  }
+}
+
+function Get-AutoUpdateEnabled {
+  param([hashtable]$EnvVars)
+
+  foreach ($key in @("AUTO_UPDATE_ENABLED", "ENABLE_AUTO_UPDATE")) {
+    $raw = $EnvVars[$key]
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      continue
+    }
+    return (Parse-BoolEnv -Raw $raw -Default $false)
+  }
+  return $true
+}
+
+function Format-TaskResult {
+  param([int]$Code)
+
+  if ($Code -eq 0) { return "0x00000000 (sucesso)" }
+  if ($Code -eq 267009) { return "0x00041301 (task em execucao)" }
+  if ($Code -eq 267011) { return "0x00041303 (ainda nao executou)" }
+  if ($Code -eq 267014) { return "0x00041306 (task finalizada)" }
+
+  $hex = ('0x{0:X8}' -f $Code)
+  return "$hex"
+}
+
 function Show-TaskInfo {
   param(
     [string]$Name
@@ -44,7 +92,8 @@ function Show-TaskInfo {
         Write-Host "  LastRun: $($info.LastRunTime)"
       }
       if ($info.LastTaskResult -ne $null) {
-        Write-Host "  LastResult: $($info.LastTaskResult)"
+        $resultCode = [int]$info.LastTaskResult
+        Write-Host "  LastResult: $resultCode ($(Format-TaskResult -Code $resultCode))"
       }
       if ($info.NextRunTime) {
         Write-Host "  NextRun: $($info.NextRunTime)"
@@ -100,7 +149,8 @@ if (-not (Test-Path $agentLog) -and (Test-Path $agentLogFallback)) {
 $updateLog = Join-Path $installRoot "logs\update.log"
 $envPath = Join-Path $installRoot ".env"
 $envVars = Read-EnvFile -Path $envPath
-$autoEnabled = ($envVars["AUTO_UPDATE_ENABLED"] -eq "1")
+$autoEnabled = Get-AutoUpdateEnabled -EnvVars $envVars
+$repo = $envVars["UPDATE_GITHUB_REPO"]
 $startupEnabled = StartupTaskEnabled -EnvVars $envVars
 $buildInfo = Join-Path $installRoot "BUILD_INFO.txt"
 
@@ -122,11 +172,14 @@ if ($startupEnabled) {
 }
 Write-Host ""
 Write-Host "=== Update task ==="
-if ($autoEnabled) {
+if ([string]::IsNullOrWhiteSpace($repo)) {
+  Write-Host "UPDATE_GITHUB_REPO ausente (task de update nao aplicavel)."
+  Write-Host ""
+} elseif ($autoEnabled) {
   $updateOk = Show-TaskInfo -Name $UpdateTaskName
   Write-Host ""
 } else {
-  Write-Host "AUTO_UPDATE_ENABLED=0 (task opcional desabilitada)"
+  Write-Host "AUTO_UPDATE desabilitado por .env (AUTO_UPDATE_ENABLED=0)."
   Write-Host ""
 }
 Write-Host "Logs:"

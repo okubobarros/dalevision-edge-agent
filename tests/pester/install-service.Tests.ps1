@@ -15,7 +15,7 @@ Describe "release bundle" {
       "HEARTBEAT_INTERVAL_SECONDS=30",
       "CAMERA_HEARTBEAT_INTERVAL_SECONDS=30",
       "DASHBOARD_URL=",
-      "AUTO_UPDATE_ENABLED=0",
+      "AUTO_UPDATE_ENABLED=1",
       "UPDATE_CHANNEL=stable",
       "UPDATE_GITHUB_REPO=daleship/dalevision-edge-agent",
       "UPDATE_INTERVAL_SECONDS=21600",
@@ -25,7 +25,9 @@ Describe "release bundle" {
       "VISION_ENABLED=1",
       "VISION_BUCKET_SECONDS=30",
       "VISION_POLL_SECONDS=10",
-      "VISION_SNAPSHOT_TIMEOUT_SECONDS=10"
+      "VISION_SNAPSHOT_TIMEOUT_SECONDS=10",
+      "VISION_MODEL_PATH=yolov8n.pt",
+      "CAMERA_SYNC_FATAL=0"
     )
 
     $lines | Should Be $expected
@@ -36,6 +38,7 @@ Describe "release bundle" {
     New-Item -ItemType Directory -Path $root | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "dist") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "release") | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $root "release/logs") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "scripts") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "scripts/internal") | Out-Null
 
@@ -45,16 +48,21 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "release/02_INSTALAR_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/03_VERIFICAR_STATUS.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/05_PARAR_AGENTE_E_LIBERAR_PASTA.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/run_agent.cmd") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/run_agent.vbs") -Value "WScript.Quit 0"
+    Set-Content -Path (Join-Path $root "release/logs/agent.log") -Value ""
+    Set-Content -Path (Join-Path $root "release/logs/update.log") -Value ""
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
+    Set-Content -Path (Join-Path $root "scripts/stop-agent.ps1") -Value "Write-Host 'stop'"
     Set-Content -Path (Join-Path $root "scripts/update.ps1") -Value "Write-Host 'update'"
     Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
     Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/.env") -Value "CLOUD_BASE_URL=https://api.dalevision.com"
+    Set-Content -Path (Join-Path $root "release/.env.template") -Value "CLOUD_BASE_URL=https://api.dalevision.com"
 
     $scriptPath = Join-Path $root "scripts/release_windows.ps1"
     Copy-Item (Join-Path $PSScriptRoot "../../scripts/release_windows.ps1") $scriptPath -Force
@@ -79,27 +87,48 @@ Describe "release bundle" {
       "02_INSTALAR_AUTOSTART.bat",
       "03_VERIFICAR_STATUS.bat",
       "04_REMOVER_AUTOSTART.bat",
+      "05_PARAR_AGENTE_E_LIBERAR_PASTA.bat",
       "Diagnose.bat",
       "run_agent.cmd",
       "run_agent.vbs",
       "BUILD_INFO.txt",
       "README.txt",
       ".env",
-      "logs/agent.log",
-      "logs/update.log",
       "scripts/install-service.ps1",
       "scripts/uninstall-service.ps1",
       "scripts/verify-service.ps1",
+      "scripts/stop-agent.ps1",
       "scripts/update.ps1",
       "scripts/internal/Start_DaleVision_Agent.ps1",
       "scripts/internal/Start_DaleVision_Agent.bat"
     )
 
-    foreach ($item in $expected) {
-      ($names -contains $item) | Should Be $true
+    function ZipContainsPath {
+      param(
+        [string[]]$Entries,
+        [string]$ExpectedPath
+      )
+      $expectedNorm = $ExpectedPath.Replace("\", "/")
+      foreach ($entry in $Entries) {
+        $entryNorm = $entry.Replace("\", "/")
+        if ($entryNorm -eq $expectedNorm) { return $true }
+        if ($entryNorm -like "*/$expectedNorm") { return $true }
+      }
+      return $false
     }
 
-    ($names -contains ".env.template") | Should Be $false
+    $missing = @()
+    foreach ($item in $expected) {
+      if (-not (ZipContainsPath -Entries $names -ExpectedPath $item)) {
+        $missing += $item
+      }
+    }
+    if ($missing.Count -gt 0) {
+      Write-Host "Missing in zip: $($missing -join ', ')"
+    }
+    ($missing.Count -eq 0) | Should Be $true
+
+    (ZipContainsPath -Entries $names -ExpectedPath ".env.template") | Should Be $false
   }
 
   It "release_windows.ps1 fails when required file is missing" {
@@ -107,6 +136,7 @@ Describe "release bundle" {
     New-Item -ItemType Directory -Path $root | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "dist") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "release") | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $root "release/logs") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "scripts") | Out-Null
     New-Item -ItemType Directory -Path (Join-Path $root "scripts/internal") | Out-Null
 
@@ -116,16 +146,20 @@ Describe "release bundle" {
     Set-Content -Path (Join-Path $root "release/02_INSTALAR_AUTOSTART.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/03_VERIFICAR_STATUS.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/04_REMOVER_AUTOSTART.bat") -Value "@echo off"
+    Set-Content -Path (Join-Path $root "release/05_PARAR_AGENTE_E_LIBERAR_PASTA.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/Diagnose.bat") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/run_agent.cmd") -Value "@echo off"
     Set-Content -Path (Join-Path $root "release/run_agent.vbs") -Value "WScript.Quit 0"
+    Set-Content -Path (Join-Path $root "release/logs/agent.log") -Value ""
+    Set-Content -Path (Join-Path $root "release/logs/update.log") -Value ""
     Set-Content -Path (Join-Path $root "scripts/install-service.ps1") -Value "Write-Host 'install'"
     Set-Content -Path (Join-Path $root "scripts/uninstall-service.ps1") -Value "Write-Host 'uninstall'"
     Set-Content -Path (Join-Path $root "scripts/verify-service.ps1") -Value "Write-Host 'verify'"
+    Set-Content -Path (Join-Path $root "scripts/stop-agent.ps1") -Value "Write-Host 'stop'"
     Set-Content -Path (Join-Path $root "scripts/update.ps1") -Value "Write-Host 'update'"
     Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.ps1") -Value "Write-Host 'start'"
     Set-Content -Path (Join-Path $root "scripts/internal/Start_DaleVision_Agent.bat") -Value "@echo off"
-    # Intencionalmente omitindo .env
+    # Intencionalmente omitindo .env e .env.template
 
     $scriptPath = Join-Path $root "scripts/release_windows.ps1"
     Copy-Item (Join-Path $PSScriptRoot "../../scripts/release_windows.ps1") $scriptPath -Force
