@@ -23,6 +23,10 @@ PASSO 4: VERIFICAR STATUS
 PASSO 5: REMOVER AUTOSTART
 1) Execute 04_REMOVER_AUTOSTART.bat.
 
+PASSO 6: PARAR AGENTE E LIBERAR PASTA
+1) Execute 05_PARAR_AGENTE_E_LIBERAR_PASTA.bat (nao precisa admin).
+2) Use antes de substituir/excluir a pasta extraida do agente.
+
 IMPORTANTE
 - Nao clique em arquivos .ps1 dentro de scripts\.
 - Auto-update vem desativado por padrao (AUTO_UPDATE_ENABLED=0).
@@ -34,6 +38,7 @@ ARQUIVOS NO ZIP
 - 02_INSTALAR_AUTOSTART.bat
 - 03_VERIFICAR_STATUS.bat
 - 04_REMOVER_AUTOSTART.bat
+- 05_PARAR_AGENTE_E_LIBERAR_PASTA.bat
 - Diagnose.bat
 - README.txt
 - logs\

@@ -82,12 +82,14 @@ $requiredSources = @(
   @{ Path = (Join-Path $releaseRoot "02_INSTALAR_AUTOSTART.bat"); Label = "02_INSTALAR_AUTOSTART.bat" },
   @{ Path = (Join-Path $releaseRoot "03_VERIFICAR_STATUS.bat"); Label = "03_VERIFICAR_STATUS.bat" },
   @{ Path = (Join-Path $releaseRoot "04_REMOVER_AUTOSTART.bat"); Label = "04_REMOVER_AUTOSTART.bat" },
+  @{ Path = (Join-Path $releaseRoot "05_PARAR_AGENTE_E_LIBERAR_PASTA.bat"); Label = "05_PARAR_AGENTE_E_LIBERAR_PASTA.bat" },
   @{ Path = (Join-Path $releaseRoot "Diagnose.bat"); Label = "Diagnose.bat" },
   @{ Path = (Join-Path $releaseRoot "run_agent.cmd"); Label = "run_agent.cmd" },
   @{ Path = (Join-Path $releaseRoot "run_agent.vbs"); Label = "run_agent.vbs" },
   @{ Path = (Join-Path $repoRoot "scripts\install-service.ps1"); Label = "install-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\uninstall-service.ps1"); Label = "uninstall-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\verify-service.ps1"); Label = "verify-service.ps1" },
+  @{ Path = (Join-Path $repoRoot "scripts\stop-agent.ps1"); Label = "stop-agent.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\update.ps1"); Label = "update.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1"); Label = "internal/Start_DaleVision_Agent.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat"); Label = "internal/Start_DaleVision_Agent.bat" }
@@ -110,6 +112,7 @@ Copy-Item (Join-Path $releaseRoot "01_TESTE_RAPIDO.bat") (Join-Path $releaseWin 
 Copy-Item (Join-Path $releaseRoot "02_INSTALAR_AUTOSTART.bat") (Join-Path $releaseWin "02_INSTALAR_AUTOSTART.bat") -Force
 Copy-Item (Join-Path $releaseRoot "03_VERIFICAR_STATUS.bat") (Join-Path $releaseWin "03_VERIFICAR_STATUS.bat") -Force
 Copy-Item (Join-Path $releaseRoot "04_REMOVER_AUTOSTART.bat") (Join-Path $releaseWin "04_REMOVER_AUTOSTART.bat") -Force
+Copy-Item (Join-Path $releaseRoot "05_PARAR_AGENTE_E_LIBERAR_PASTA.bat") (Join-Path $releaseWin "05_PARAR_AGENTE_E_LIBERAR_PASTA.bat") -Force
 Copy-Item (Join-Path $releaseRoot "Diagnose.bat") (Join-Path $releaseWin "Diagnose.bat") -Force
 Copy-Item (Join-Path $releaseRoot "run_agent.cmd") (Join-Path $releaseWin "run_agent.cmd") -Force
 Copy-Item (Join-Path $releaseRoot "run_agent.vbs") (Join-Path $releaseWin "run_agent.vbs") -Force
@@ -125,6 +128,7 @@ Copy-Item (Join-Path $repoRoot "scripts\uninstall-service.ps1") (Join-Path $scri
 Copy-Item (Join-Path $repoRoot "scripts\install-service.ps1") (Join-Path $scriptsDir "install_service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\uninstall-service.ps1") (Join-Path $scriptsDir "uninstall_service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\verify-service.ps1") (Join-Path $scriptsDir "verify-service.ps1") -Force
+Copy-Item (Join-Path $repoRoot "scripts\stop-agent.ps1") (Join-Path $scriptsDir "stop-agent.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\update.ps1") (Join-Path $scriptsDir "update.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.ps1") (Join-Path $internalDir "Start_DaleVision_Agent.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\internal\Start_DaleVision_Agent.bat") (Join-Path $internalDir "Start_DaleVision_Agent.bat") -Force
@@ -179,6 +183,7 @@ $required = @(
   "02_INSTALAR_AUTOSTART.bat",
   "03_VERIFICAR_STATUS.bat",
   "04_REMOVER_AUTOSTART.bat",
+  "05_PARAR_AGENTE_E_LIBERAR_PASTA.bat",
   "Diagnose.bat",
   "run_agent.cmd",
   "run_agent.vbs",
@@ -189,6 +194,7 @@ $required = @(
   "scripts/install_service.ps1",
   "scripts/uninstall_service.ps1",
   "scripts/verify-service.ps1",
+  "scripts/stop-agent.ps1",
   "scripts/update.ps1",
   "scripts/internal/Start_DaleVision_Agent.ps1",
   "scripts/internal/Start_DaleVision_Agent.bat"

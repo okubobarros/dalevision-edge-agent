@@ -108,6 +108,32 @@ function Download-Asset {
   $client.DownloadFile($Url, $DestinationPath)
 }
 
+function Stop-AgentProcesses {
+  param([string]$InstallRoot)
+
+  $exeName = "dalevision-edge-agent"
+  $exeProcs = Get-Process -Name $exeName -ErrorAction SilentlyContinue
+  if ($exeProcs) {
+    $exeProcs | Stop-Process -Force -ErrorAction SilentlyContinue
+  }
+
+  try {
+    $wscript = Get-CimInstance Win32_Process -Filter "Name='wscript.exe'" -ErrorAction Stop |
+      Where-Object { $_.CommandLine -like "*run_agent.vbs*" }
+    foreach ($p in $wscript) {
+      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+  } catch {}
+
+  try {
+    $ps = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Stop |
+      Where-Object { $_.CommandLine -like "*Start_DaleVision_Agent.ps1*" }
+    foreach ($p in $ps) {
+      Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+  } catch {}
+}
+
 $installRoot = (Resolve-Path $InstallDir).Path
 $logDir = Join-Path $installRoot "logs"
 if (-not (Test-Path $logDir)) {
@@ -198,20 +224,31 @@ try {
   }
 
   Write-Log "UPD030 aplicando update..."
-  $processes = Get-Process -Name "dalevision-edge-agent" -ErrorAction SilentlyContinue
-  if ($processes) {
-    $processes | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
-  }
+  Stop-AgentProcesses -InstallRoot $installRoot
+  Start-Sleep -Seconds 2
 
   $backup = Join-Path $installRoot "dalevision-edge-agent.exe.bak"
   if (Test-Path $backup) {
     Remove-Item $backup -Force -ErrorAction SilentlyContinue
   }
-  if (Test-Path $exePath) {
-    Move-Item -Path $exePath -Destination $backup -Force
+  $copied = $false
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+      if (Test-Path $exePath) {
+        Move-Item -Path $exePath -Destination $backup -Force
+      }
+      Copy-Item -Path $newExePath -Destination $exePath -Force
+      $copied = $true
+      break
+    } catch {
+      Write-Log "UPD030 retry $attempt/5 copy failed: $($_.Exception.Message)"
+      Stop-AgentProcesses -InstallRoot $installRoot
+      Start-Sleep -Seconds 2
+    }
   }
-  Copy-Item -Path $newExePath -Destination $exePath -Force
+  if (-not $copied) {
+    throw "UPD030 copy failed after retries"
+  }
 
   $versionFile = Join-Path $installRoot "VERSION"
   Set-Content -Path $versionFile -Value $latestVersion
