@@ -119,6 +119,86 @@ function Get-ReleaseApiUrl {
   return "https://api.github.com/repos/$Repo/releases/latest"
 }
 
+function Get-HeaderValue {
+  param(
+    [hashtable]$EnvVars,
+    [string[]]$Keys
+  )
+  foreach ($key in $Keys) {
+    $value = $EnvVars[$key]
+    if (-not [string]::IsNullOrWhiteSpace($value)) {
+      return $value.Trim()
+    }
+  }
+  return ""
+}
+
+function Try-GetPolicyPayload {
+  param(
+    [hashtable]$EnvVars
+  )
+
+  $cloudBaseUrl = Get-HeaderValue -EnvVars $EnvVars -Keys @("CLOUD_BASE_URL")
+  $edgeToken = Get-HeaderValue -EnvVars $EnvVars -Keys @("EDGE_TOKEN", "DALE_EDGE_TOKEN", "EDGE_CLOUD_TOKEN")
+  $agentId = Get-HeaderValue -EnvVars $EnvVars -Keys @("AGENT_ID")
+
+  if ([string]::IsNullOrWhiteSpace($cloudBaseUrl) -or [string]::IsNullOrWhiteSpace($edgeToken)) {
+    return $null
+  }
+
+  $policyUrl = ($cloudBaseUrl.TrimEnd("/") + "/api/edge/update-policy/")
+  $client = New-Object System.Net.WebClient
+  $client.Headers["User-Agent"] = "dalevision-edge-agent"
+  $client.Headers["X-EDGE-TOKEN"] = $edgeToken
+  if (-not [string]::IsNullOrWhiteSpace($agentId)) {
+    $client.Headers["X-AGENT-ID"] = $agentId
+  }
+
+  try {
+    $raw = $client.DownloadString($policyUrl)
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+      return $null
+    }
+    return ($raw | ConvertFrom-Json)
+  } catch {
+    Write-Log "UPD006 policy check falhou: $($_.Exception.Message)"
+    return $null
+  }
+}
+
+function Normalize-ReleasePayloadFromPolicy {
+  param(
+    [object]$Policy
+  )
+
+  if (-not $Policy) {
+    return $null
+  }
+
+  $targetVersion = [string]$Policy.target_version
+  $package = $Policy.package
+  $packageUrl = if ($package) { [string]$package.url } else { "" }
+
+  if ([string]::IsNullOrWhiteSpace($targetVersion) -or [string]::IsNullOrWhiteSpace($packageUrl)) {
+    return $null
+  }
+
+  $assetName = [System.IO.Path]::GetFileName($packageUrl)
+  if ([string]::IsNullOrWhiteSpace($assetName)) {
+    $assetName = "dalevision-edge-agent-$targetVersion.zip"
+  }
+
+  return [PSCustomObject]@{
+    tag_name = $targetVersion
+    assets = @(
+      [PSCustomObject]@{
+        name = $assetName
+        browser_download_url = $packageUrl
+      }
+    )
+  }
+}
+
 function Compare-Version {
   param(
     [string]$Current,
@@ -198,15 +278,27 @@ try {
   $currentVersion = Get-CurrentVersion -InstallRoot $installRoot -ExePath $exePath
   Write-Log "UPD001 current_version=$currentVersion channel=$channel"
 
-  $apiUrl = Get-ReleaseApiUrl -Repo $repo -Channel $channel -BetaTag $betaTag
-  if ([string]::IsNullOrWhiteSpace($apiUrl)) {
-    Write-Log "UPD002 url invalida."
-    exit 0
+  $json = $null
+  $policyPayload = Try-GetPolicyPayload -EnvVars $envVars
+  $json = Normalize-ReleasePayloadFromPolicy -Policy $policyPayload
+  if ($json) {
+    Write-Log "UPD007 policy update source selecionada."
+  } else {
+    $apiUrl = Get-ReleaseApiUrl -Repo $repo -Channel $channel -BetaTag $betaTag
+    if ([string]::IsNullOrWhiteSpace($apiUrl)) {
+      Write-Log "UPD002 url invalida."
+      exit 0
+    }
+    try {
+      $client = New-Object System.Net.WebClient
+      $client.Headers["User-Agent"] = "dalevision-edge-agent"
+      $json = $client.DownloadString($apiUrl) | ConvertFrom-Json
+      Write-Log "UPD008 github update source selecionada."
+    } catch {
+      Write-Log "UPD009 sem policy e sem release GitHub: $($_.Exception.Message)"
+      exit 0
+    }
   }
-
-  $client = New-Object System.Net.WebClient
-  $client.Headers["User-Agent"] = "dalevision-edge-agent"
-  $json = $client.DownloadString($apiUrl) | ConvertFrom-Json
 
   $latestVersion = $json.tag_name
   if ([string]::IsNullOrWhiteSpace($latestVersion)) {
