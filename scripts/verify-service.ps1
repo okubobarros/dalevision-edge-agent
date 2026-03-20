@@ -130,9 +130,9 @@ function StartupTaskEnabled {
     if ([string]::IsNullOrWhiteSpace($raw)) {
       continue
     }
-    return ($raw.Trim() -eq "1")
+    return (Parse-BoolEnv -Raw $raw -Default $true)
   }
-  return $false
+  return $true
 }
 
 $installRoot = Split-Path -Parent $PSScriptRoot
@@ -167,7 +167,7 @@ Write-Host "=== Agent startup task ==="
 if ($startupEnabled) {
   $startupOk = Show-TaskInfo -Name $StartupTaskName
 } else {
-  Write-Host "STARTUP_TASK_ENABLED=0 (task opcional desabilitada)"
+  Write-Host "STARTUP_TASK_ENABLED=0 (task startup desabilitada por .env)"
   $startupOk = $false
 }
 Write-Host ""

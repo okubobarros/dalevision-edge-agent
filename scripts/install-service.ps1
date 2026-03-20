@@ -258,10 +258,11 @@ function Get-StartupTaskEnabled {
     if ([string]::IsNullOrWhiteSpace($raw)) {
       continue
     }
-    return ($raw.Trim() -eq "1")
+    return (Parse-BoolEnv -Raw $raw -Default $true)
   }
 
-  return $false
+  # Default operacional: habilitado para sobreviver a reboot sem login.
+  return $true
 }
 
 function Invoke-InstallService {

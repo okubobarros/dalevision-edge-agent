@@ -9,6 +9,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -651,6 +652,40 @@ def _auto_set_vision_model_path(logger: logging.Logger) -> None:
     logger.warning("modelo nao encontrado localmente; pode baixar da internet.")
 
 
+def _normalize_vision_model_path(logger: logging.Logger) -> None:
+    raw = os.getenv("VISION_MODEL_PATH")
+    if raw is None:
+        return
+    current = raw.strip()
+    if not current:
+        return
+
+    normalized = current.strip().strip('"').strip("'")
+    markdown_match = re.match(r"^\[([^\]]+)\]\(([^)]+)\)$", normalized)
+    if markdown_match:
+        label = markdown_match.group(1).strip()
+        link = markdown_match.group(2).strip()
+        if label:
+            normalized = label
+        elif link:
+            normalized = Path(link.split("?", 1)[0]).name
+
+    lower = normalized.lower()
+    if lower.startswith(("http://", "https://")):
+        normalized = Path(normalized.split("?", 1)[0]).name
+
+    if not normalized:
+        return
+
+    if normalized != current:
+        os.environ["VISION_MODEL_PATH"] = normalized
+        logger.warning(
+            "VISION_MODEL_PATH ajustado automaticamente de '%s' para '%s'",
+            current,
+            normalized,
+        )
+
+
 def _run_once(
     *,
     settings,
@@ -1078,6 +1113,7 @@ def main() -> int:
             pending.unlink(missing_ok=True)
         logger.info("UPD040 update finalized from %s", args.updated_from)
     detect_snapshot_support(logger)
+    _normalize_vision_model_path(logger)
     _auto_set_vision_model_path(logger)
 
     url = f"{settings.cloud_base_url}/api/edge/events/"
@@ -1267,6 +1303,30 @@ def main() -> int:
         )
         t.start()
         camera_health_loop_started = True
+    elif (not camera_sync_enabled) and cameras_json_list:
+        logger.info(
+            "[CAMERA_HEALTH] camera sync disabled; using CAMERAS_JSON fallback cameras=%s interval=%ss",
+            len(cameras_json_list),
+            camera_health_interval_seconds,
+        )
+        t = threading.Thread(
+            target=_camera_health_loop,
+            kwargs={
+                "cloud_base_url": settings.cloud_base_url,
+                "edge_token": settings.edge_token,
+                "store_id": settings.store_id,
+                "agent_id": settings.agent_id,
+                "cameras": cameras_json_list,
+                "interval_seconds": camera_health_interval_seconds,
+                "logger": logger,
+                "state_store": camera_states,
+                "watchdog_state": watchdog_state,
+                "watchdog_lock": watchdog_lock,
+            },
+            daemon=True,
+        )
+        t.start()
+        camera_health_loop_started = True
 
     if watchdog_enabled:
         t_watchdog = threading.Thread(
@@ -1303,7 +1363,7 @@ def main() -> int:
             )
             if cameras_error:
                 logger.warning("Camera sync skipped: %s", cameras_error)
-                if local_cameras_mode and not camera_health_loop_started:
+                if cameras_json_list and not camera_health_loop_started:
                     logger.warning(
                         "[CAMERA_HEALTH] camera sync failed; starting CAMERAS_JSON fallback cameras=%s",
                         len(cameras_json_list),
@@ -1319,6 +1379,8 @@ def main() -> int:
                             "interval_seconds": camera_health_interval_seconds,
                             "logger": logger,
                             "state_store": camera_states,
+                            "watchdog_state": watchdog_state,
+                            "watchdog_lock": watchdog_lock,
                         },
                         daemon=True,
                     )
