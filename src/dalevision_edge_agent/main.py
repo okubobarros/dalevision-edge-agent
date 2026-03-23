@@ -25,6 +25,7 @@ from .cameras import (
     capture_snapshot_if_possible,
     check_camera_health,
     detect_snapshot_support,
+    estimate_snapshot_quality,
     fetch_cameras,
     fetch_roi,
     mask_rtsp_url,
@@ -1483,6 +1484,12 @@ def main() -> int:
                                 health["snapshot_taken"] = True
                                 health["snapshot_url"] = snapshot_result.get(
                                     "snapshot_local_path"
+                                )
+                                health.update(
+                                    estimate_snapshot_quality(
+                                        snapshot_result.get("snapshot_local_path"),
+                                        logger=logger,
+                                    )
                                 )
                                 logger.info(
                                     "camera_id=%s snapshot ready (upload pending)",

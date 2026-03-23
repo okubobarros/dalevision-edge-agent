@@ -76,6 +76,49 @@ def build_auth_headers(edge_token: str) -> dict[str, str]:
     }
 
 
+def estimate_snapshot_quality(
+    snapshot_path: str | None,
+    *,
+    logger: Optional[logging.Logger] = None,
+) -> dict[str, Any]:
+    if not snapshot_path:
+        return {}
+    path = Path(snapshot_path)
+    if not path.exists():
+        return {}
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception:
+        if logger:
+            logger.debug("snapshot quality skipped: cv2/numpy unavailable")
+        return {}
+
+    try:
+        image = cv2.imread(str(path))
+        if image is None:
+            return {}
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        brightness = float(np.mean(gray))
+        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        # Lighting score: midpoint around 115 (indoor), degrade when too dark/too bright.
+        lighting_score = max(0.0, min(100.0, 100.0 - (abs(brightness - 115.0) / 115.0) * 100.0))
+        # Sharpness score: saturates close to 100 around Laplacian variance 250+.
+        sharpness_score = max(0.0, min(100.0, (lap_var / 250.0) * 100.0))
+        # Pose quality proxy for heartbeat diagnostics.
+        camera_pose_quality = round((lighting_score * 0.45) + (sharpness_score * 0.55), 1)
+        return {
+            "lighting_score": round(lighting_score, 1),
+            "sharpness_score": round(sharpness_score, 1),
+            "camera_pose_quality": camera_pose_quality,
+            "image_brightness_mean": round(brightness, 2),
+        }
+    except Exception as exc:
+        if logger:
+            logger.debug("snapshot quality failed path=%s err=%s", snapshot_path, exc)
+        return {}
+
+
 def _format_auth_header_debug(headers: dict[str, str]) -> str:
     token = headers.get("X-EDGE-TOKEN") or ""
     prefix = token[:6] if token else ""
@@ -482,6 +525,14 @@ def send_camera_health_event(
         event_payload["snapshot_local_path"] = camera_health.get("snapshot_local_path")
     if "snapshot_status" in camera_health:
         event_payload["snapshot_status"] = camera_health.get("snapshot_status")
+    for optional_key in (
+        "lighting_score",
+        "sharpness_score",
+        "camera_pose_quality",
+        "image_brightness_mean",
+    ):
+        if optional_key in camera_health:
+            event_payload[optional_key] = camera_health.get(optional_key)
     envelope = {
         "event_name": "camera_health",
         "source": "edge",
@@ -781,6 +832,9 @@ def build_camera_heartbeat_fields(
                 "camera_id": camera_id,
                 "status": status,
                 "roi_version": state.get("roi_version"),
+                "lighting_score": state.get("lighting_score"),
+                "sharpness_score": state.get("sharpness_score"),
+                "camera_pose_quality": state.get("camera_pose_quality"),
             }
         )
 
