@@ -54,9 +54,14 @@ VISION_BLUR_ENABLED=1
 VISION_BLUR_STRENGTH=41
 VISION_EMBED_THUMBNAIL=0
 VISION_THUMBNAIL_WIDTH=320
+VISION_OUTBOX_ENABLED=1
+VISION_OUTBOX_PATH=.\cache\vision_outbox.sqlite
+VISION_OUTBOX_BATCH_SIZE=50
+VISION_OUTBOX_MAX_ATTEMPTS=8
 ```
 Observações:
 - `VISION_EMBED_THUMBNAIL=1` envia thumbnail blur (base64) no payload do alerta.
+- Eventos de visão usam outbox SQLite offline-first quando `VISION_OUTBOX_ENABLED=1`.
 - Sem OpenCV/YOLO, o worker degrada com logs e segue sem bloquear o agente.
 - ROI remoto v2 aceita `zones + lines + ownership`.
 - Para `entry_exit`, a linha e direcional: a ordem dos dois pontos define o sentido de `entry` vs `exit`.
@@ -104,6 +109,10 @@ O script de release bloqueia qualquer pacote que contenha:
 - vídeos (`*.mp4`, `*.avi`, `*.mov`, `*.mkv`)
 - pesos de modelo (`yolov8*.pt` e qualquer `*.pt`)
 - arquivos sensíveis: `.env`, `*.env`, `*.log`
+
+Runtime canonico:
+- O entrypoint oficial do agente e `dalevision_edge_agent.main:main` (definido no `pyproject.toml`).
+- Trilha `edge-agent/src` e legada para referencia/historico e nao deve ser usada como runtime de release.
 
 Se qualquer um desses arquivos aparecer na pasta de staging ou no ZIP, o release falha e lista os caminhos encontrados.
 

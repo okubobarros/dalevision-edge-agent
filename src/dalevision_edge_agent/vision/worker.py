@@ -17,6 +17,7 @@ from dotenv import dotenv_values
 
 from ..cameras import _ffmpeg_path, build_auth_headers, fetch_roi, mask_rtsp_url
 from ..events import compute_idempotency_key
+from .outbox import VisionOutbox
 from .geometry import line_side, point_in_polygon
 from .roi_yaml import load_roi_yaml
 from .sources.video import VideoFrameSource
@@ -172,6 +173,11 @@ class VisionWorker:
         self._roi_override: Optional[dict] = None
         self._roi_cache: Dict[str, dict] = {}
         self._roi_path_by_camera: Dict[str, str] = {}
+        self._outbox_enabled = self._parse_bool_env("VISION_OUTBOX_ENABLED", True)
+        self._outbox_batch_size = max(1, int(_env_str("VISION_OUTBOX_BATCH_SIZE", "50") or "50"))
+        self._outbox_max_attempts = max(1, int(_env_str("VISION_OUTBOX_MAX_ATTEMPTS", "8") or "8"))
+        self._outbox = VisionOutbox(self._resolve_outbox_path()) if self._outbox_enabled else None
+        self._last_outbox_log_at = 0.0
         if self.cfg.roi_path:
             try:
                 zones, lines = load_roi_yaml(self.cfg.roi_path)
@@ -199,7 +205,9 @@ class VisionWorker:
         self.logger.info("[VISION] worker started (bucket=%ss)", self.cfg.bucket_seconds)
         while not self._stop.is_set():
             try:
+                self._flush_outbox()
                 self.tick_once()
+                self._flush_outbox()
             except Exception as exc:
                 self.logger.exception("[VISION] tick failed: %s", exc)
             time.sleep(self.cfg.poll_seconds)
@@ -307,6 +315,7 @@ class VisionWorker:
             for frame, ts in source.frames():
                 if self._stop.is_set():
                     break
+                self._flush_outbox(limit=10)
                 last_ts = ts
                 bucket_start = _bucket_start(ts, self.cfg.bucket_seconds)
                 metrics = self._process_frame(state, cam, frame, ts)
@@ -328,6 +337,105 @@ class VisionWorker:
             payload = self._build_payload(cam, state, {}, state["bucket_start"], bucket_end)
             self._log_bucket_summary(payload, state)
             self._send_event(payload)
+        self._flush_outbox()
+
+    def _resolve_outbox_path(self) -> Path:
+        raw = _env_str("VISION_OUTBOX_PATH", "").strip()
+        if raw:
+            path = Path(raw)
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            return path
+        return Path.cwd() / "cache" / "vision_outbox.sqlite"
+
+    def _outbox_backoff_seconds(self, attempts: int) -> int:
+        return min(300, int(2 ** min(max(1, attempts), 8)))
+
+    def _send_now(self, envelope: dict) -> tuple[bool, Optional[int], Optional[str]]:
+        url = f"{self.cloud_base_url}/api/edge/events/"
+        headers = build_auth_headers(self.edge_token)
+        try:
+            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
+            if 200 <= resp.status_code < 300:
+                return True, resp.status_code, None
+            detail = None
+            try:
+                body = resp.json()
+                detail = body.get("detail") if isinstance(body, dict) else str(body)
+            except Exception:
+                detail = (resp.text or "").strip()[:300]
+            return False, resp.status_code, detail or f"http_{resp.status_code}"
+        except Exception as exc:
+            return False, None, str(exc)
+
+    def _send_or_enqueue(self, *, envelope: dict, context: str) -> None:
+        ok, status, error = self._send_now(envelope)
+        receipt = str(envelope.get("receipt_id") or "")[:10]
+        if ok:
+            self.logger.info("[VISION] %s sent status=%s receipt=%s", context, status, receipt)
+            return
+        if self._outbox is None:
+            self.logger.warning("[VISION] %s send failed status=%s error=%s", context, status, error)
+            return
+        queued = self._outbox.enqueue(envelope)
+        self.logger.warning(
+            "[VISION] %s send failed status=%s error=%s queued=%s receipt=%s",
+            context,
+            status,
+            error,
+            queued,
+            receipt,
+        )
+
+    def _flush_outbox(self, *, limit: Optional[int] = None) -> None:
+        if self._outbox is None:
+            return
+        batch_size = int(limit or self._outbox_batch_size)
+        batch = self._outbox.peek_batch(limit=batch_size)
+        if not batch:
+            return
+        sent = 0
+        failed = 0
+        dropped = 0
+        for row_id, payload, attempts in batch:
+            ok, status, error = self._send_now(payload)
+            if ok:
+                self._outbox.mark_sent(row_id)
+                sent += 1
+                continue
+            next_attempts = int(attempts) + 1
+            if next_attempts >= self._outbox_max_attempts:
+                self._outbox.mark_sent(row_id)
+                dropped += 1
+                self.logger.error(
+                    "[VISION] outbox drop row=%s attempts=%s status=%s error=%s",
+                    row_id,
+                    next_attempts,
+                    status,
+                    error,
+                )
+                continue
+            self._outbox.mark_failed(
+                row_id,
+                attempts=next_attempts,
+                error=str(error or f"http_{status or 'error'}"),
+                backoff_seconds=self._outbox_backoff_seconds(next_attempts),
+            )
+            failed += 1
+
+        now = time.time()
+        if sent or failed or dropped or (now - self._last_outbox_log_at) > 60:
+            pending = self._outbox.size()
+            oldest_pending_seconds = self._outbox.oldest_pending_seconds()
+            self.logger.info(
+                "[VISION] outbox flush sent=%s failed=%s dropped=%s pending=%s oldest_pending_seconds=%s",
+                sent,
+                failed,
+                dropped,
+                pending,
+                oldest_pending_seconds,
+            )
+            self._last_outbox_log_at = now
 
     def _parse_bool_env(self, name: str, default: bool) -> bool:
         raw = _env_str(name, "")
@@ -1140,13 +1248,7 @@ class VisionWorker:
             "ts": payload.get("occurred_at"),
             "data": payload,
         }
-        url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
-            self.logger.info("[VISION] alert sent status=%s type=%s", resp.status_code, payload.get("event_type"))
-        except Exception as exc:
-            self.logger.warning("[VISION] alert send failed: %s", exc)
+        self._send_or_enqueue(envelope=envelope, context=f"alert:{payload.get('event_type')}")
 
     def _yolo_track(self, state: dict, frame) -> Optional[dict]:
         try:
@@ -1509,13 +1611,7 @@ class VisionWorker:
             "ts": payload["bucket"]["end"],
             "data": payload,
         }
-        url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
-            self.logger.info("[VISION] event sent status=%s receipt=%s", resp.status_code, receipt_id[:10])
-        except Exception as exc:
-            self.logger.warning("[VISION] event send failed: %s", exc)
+        self._send_or_enqueue(envelope=envelope, context=event_name)
 
     def _send_crossing_event(
         self,
@@ -1558,18 +1654,7 @@ class VisionWorker:
             "ts": payload["ts"],
             "data": payload,
         }
-        url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
-            self.logger.info(
-                "[VISION] crossing sent status=%s camera_id=%s direction=%s",
-                resp.status_code,
-                camera_id,
-                direction,
-            )
-        except Exception as exc:
-            self.logger.warning("[VISION] crossing send failed: %s", exc)
+        self._send_or_enqueue(envelope=envelope, context=f"{event_name}:{camera_id}:{direction}")
 
         retail_event_type = "person_enter" if direction == "entry" else "person_exit"
         self._send_retail_event(
@@ -1627,19 +1712,10 @@ class VisionWorker:
             "ts": payload["ts"],
             "data": payload,
         }
-        url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
-            self.logger.info(
-                "[VISION] queue_state sent status=%s camera_id=%s queue=%s staff=%s",
-                resp.status_code,
-                camera_id,
-                queue_length,
-                staff_active_est,
-            )
-        except Exception as exc:
-            self.logger.warning("[VISION] queue_state send failed: %s", exc)
+        self._send_or_enqueue(
+            envelope=envelope,
+            context=f"{event_name}:{camera_id}:q{queue_length}:s{staff_active_est}",
+        )
 
         self._send_retail_event(
             event_type="queue_length",
@@ -1706,18 +1782,10 @@ class VisionWorker:
             "ts": payload["ts"],
             "data": payload,
         }
-        url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
-            self.logger.info(
-                "[VISION] zone_occupancy sent status=%s camera_id=%s occupancy=%s",
-                resp.status_code,
-                camera_id,
-                occupancy_count,
-            )
-        except Exception as exc:
-            self.logger.warning("[VISION] zone_occupancy send failed: %s", exc)
+        self._send_or_enqueue(
+            envelope=envelope,
+            context=f"{event_name}:{camera_id}:occ{occupancy_count}",
+        )
 
         self._send_retail_event(
             event_type="zone_dwell",
@@ -1822,18 +1890,10 @@ class VisionWorker:
             "ts": payload["ts"],
             "data": payload,
         }
-        url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
-            self.logger.info(
-                "[VISION] checkout_proxy sent status=%s camera_id=%s duration=%s",
-                resp.status_code,
-                camera_id,
-                duration_seconds,
-            )
-        except Exception as exc:
-            self.logger.warning("[VISION] checkout_proxy send failed: %s", exc)
+        self._send_or_enqueue(
+            envelope=envelope,
+            context=f"{event_name}:{camera_id}:dur{duration_seconds}",
+        )
 
         self._send_retail_event(
             event_type="sale_completed",
@@ -1886,14 +1946,4 @@ class VisionWorker:
             "ts": ts,
             "data": data,
         }
-        url = f"{self.cloud_base_url}/api/edge/events/"
-        headers = build_auth_headers(self.edge_token)
-        try:
-            resp = requests.post(url, json=envelope, headers=headers, timeout=10)
-            self.logger.info(
-                "[VISION] retail.event.v1 sent status=%s type=%s",
-                resp.status_code,
-                event_type,
-            )
-        except Exception as exc:
-            self.logger.warning("[VISION] retail.event.v1 send failed: %s", exc)
+        self._send_or_enqueue(envelope=envelope, context=f"retail.event.v1:{event_type}")
