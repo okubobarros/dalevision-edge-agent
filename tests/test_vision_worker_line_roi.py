@@ -118,6 +118,47 @@ def test_extract_roi_preserves_line_and_zone_metadata() -> None:
     assert roi["line_meta"]["Entrada"]["roi_entity_id"] == "entry-line"
 
 
+def test_normalize_camera_accepts_snapshot_only_source() -> None:
+    worker = VisionWorker(
+        cloud_base_url="https://api.example.com",
+        store_id="store-1",
+        edge_token="token",
+        logger=Mock(),
+    )
+    camera = worker._normalize_camera(
+        {
+            "id": "cam-1",
+            "name": "Cam Snapshot",
+            "last_snapshot_url": "https://snapshot.example.com/cam-1.jpg",
+        }
+    )
+
+    assert camera is not None
+    assert camera["camera_id"] == "cam-1"
+    assert camera["rtsp_url"] == ""
+    assert camera["last_snapshot_url"] == "https://snapshot.example.com/cam-1.jpg"
+
+
+def test_normalize_camera_accepts_rtsp_alias_fields() -> None:
+    worker = VisionWorker(
+        cloud_base_url="https://api.example.com",
+        store_id="store-1",
+        edge_token="token",
+        logger=Mock(),
+    )
+    camera = worker._normalize_camera(
+        {
+            "id": "cam-2",
+            "name": "Cam Stream",
+            "stream_url": "rtsp://example.com/live",
+        }
+    )
+
+    assert camera is not None
+    assert camera["camera_id"] == "cam-2"
+    assert camera["rtsp_url"] == "rtsp://example.com/live"
+
+
 def test_process_frame_emits_queue_state_with_queue_roi_context() -> None:
     worker = VisionWorker(
         cloud_base_url="https://api.example.com",

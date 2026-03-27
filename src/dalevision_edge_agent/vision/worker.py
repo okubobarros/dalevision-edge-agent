@@ -360,7 +360,7 @@ class VisionWorker:
         for idx, item in enumerate(payload):
             normalized = self._normalize_camera(item)
             if normalized is None:
-                self.logger.warning("[VISION] %s item=%s skipped (missing id/rtsp_url)", source, idx)
+                self.logger.warning("[VISION] %s item=%s skipped (missing id/frame source)", source, idx)
                 continue
             cameras.append(normalized)
         return cameras, None
@@ -387,14 +387,27 @@ class VisionWorker:
         if not isinstance(cam, dict):
             return None
         camera_id = str(cam.get("camera_id") or cam.get("id") or "").strip()
-        rtsp_url = str(cam.get("rtsp_url") or "").strip()
-        if not camera_id or not rtsp_url:
+        rtsp_url = str(
+            cam.get("rtsp_url")
+            or cam.get("stream_url")
+            or cam.get("rtsp")
+            or cam.get("url")
+            or ""
+        ).strip()
+        snapshot_url = str(
+            cam.get("last_snapshot_url")
+            or cam.get("snapshot_url")
+            or cam.get("snapshot")
+            or ""
+        ).strip()
+        if not camera_id or (not rtsp_url and not snapshot_url):
             return None
         return {
             **cam,
             "id": camera_id,
             "camera_id": camera_id,
             "rtsp_url": rtsp_url,
+            "last_snapshot_url": snapshot_url,
             "name": str(cam.get("name") or "").strip(),
             "external_id": str(cam.get("external_id") or cam.get("name") or "").strip(),
         }
