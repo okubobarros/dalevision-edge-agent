@@ -37,6 +37,7 @@ from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_s
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import build_onboarding_blueprint, run_discovery, run_scan
+from .setup_api import serve_setup_api
 from .update import (
     apply_update_if_possible,
     acquire_update_lock,
@@ -453,6 +454,10 @@ def _parse_args() -> argparse.Namespace:
     )
     onboarding_parser.add_argument("--plan", default="trial")
     onboarding_parser.add_argument("--json", action="store_true")
+
+    setup_api_parser = subparsers.add_parser("setup-api", help="Run local setup API for onboarding")
+    setup_api_parser.add_argument("--host", default="127.0.0.1")
+    setup_api_parser.add_argument("--port", type=int, default=8787)
 
     rtsp_parser = subparsers.add_parser("test-rtsp", help="Test RTSP connection")
     rtsp_parser.add_argument("--ip", required=True)
@@ -1028,6 +1033,15 @@ def main() -> int:
                 print(
                     f"- {indicator['key']} ({indicator['roi_shape']}, {required_label})"
                 )
+        return 0
+
+    if args.command == "setup-api":
+        serve_setup_api(
+            host=args.host,
+            port=int(args.port),
+            discovery_provider=lambda: run_scan(logger=logger),
+            logger=logger,
+        )
         return 0
 
     if args.command == "test-rtsp":
