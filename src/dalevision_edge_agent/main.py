@@ -36,7 +36,7 @@ from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 from .rtsp_test import test_rtsp, test_rtsp_channels
-from .scan import run_discovery, run_scan
+from .scan import build_onboarding_blueprint, run_discovery, run_scan
 from .update import (
     apply_update_if_possible,
     acquire_update_lock,
@@ -446,6 +446,13 @@ def _parse_args() -> argparse.Namespace:
     scan_parser = subparsers.add_parser("scan", help="Scan local network for NVRs")
     scan_parser.add_argument("--mode", default="nvr", choices=["nvr"])
     scan_parser.add_argument("--range", default="auto", choices=["auto"])
+
+    onboarding_parser = subparsers.add_parser(
+        "onboarding-blueprint",
+        help="Build onboarding payload with camera limit and indicator catalog",
+    )
+    onboarding_parser.add_argument("--plan", default="trial")
+    onboarding_parser.add_argument("--json", action="store_true")
 
     rtsp_parser = subparsers.add_parser("test-rtsp", help="Test RTSP connection")
     rtsp_parser.add_argument("--ip", required=True)
@@ -1000,6 +1007,27 @@ def main() -> int:
                 f"- {item['ip']} ports={item['ports']} confidence={item['confidence']} "
                 f"status={item.get('status')} reason={item.get('reason_code')}"
             )
+        return 0
+
+    if args.command == "onboarding-blueprint":
+        raw_scan_results = run_scan(logger=logger)
+        payload = build_onboarding_blueprint(raw_scan_results, plan_code=args.plan)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(
+                f"Plano={payload['plan_code']} limite={payload['camera_limit']} "
+                f"candidatas={len(payload['candidates'])}"
+            )
+            print("Cameras recomendadas:")
+            for ip in payload["selection_guidance"]["recommended_camera_ips"]:
+                print(f"- {ip}")
+            print("Indicadores disponiveis:")
+            for indicator in payload["indicators"]:
+                required_label = "required" if indicator.get("required") else "optional"
+                print(
+                    f"- {indicator['key']} ({indicator['roi_shape']}, {required_label})"
+                )
         return 0
 
     if args.command == "test-rtsp":

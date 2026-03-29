@@ -10,6 +10,38 @@ from .diagnostics import _parse_ipconfig, _run_cmd
 SCAN_PORTS = (80, 443, 554, 37777)
 SCAN_TIMEOUT_SECONDS = 0.2
 MAX_SCAN_WORKERS = 64
+PLAN_CAMERA_LIMITS = {
+    "trial": 3,
+    "start": 6,
+    "essentials": 12,
+    "scale": 24,
+}
+ONBOARDING_INDICATORS = [
+    {
+        "key": "entry_flow",
+        "label": "Fluxo de entrada/saida",
+        "roi_shape": "line",
+        "required": True,
+    },
+    {
+        "key": "queue_monitoring",
+        "label": "Fila no caixa",
+        "roi_shape": "polygon",
+        "required": False,
+    },
+    {
+        "key": "staff_presence",
+        "label": "Presenca de equipe",
+        "roi_shape": "polygon",
+        "required": False,
+    },
+    {
+        "key": "occupancy_monitoring",
+        "label": "Ocupacao da area",
+        "roi_shape": "polygon",
+        "required": False,
+    },
+]
 
 
 def _scan_range(ipv4: str, logger: logging.Logger) -> list[dict[str, Any]]:
@@ -118,3 +150,58 @@ def build_discovery_candidates(scan_results: list[dict[str, Any]]) -> list[dict[
 
 def run_discovery(*, logger: logging.Logger) -> list[dict[str, Any]]:
     return build_discovery_candidates(run_scan(logger=logger))
+
+
+def _camera_limit_for_plan(plan_code: str) -> int:
+    normalized = str(plan_code or "trial").strip().lower()
+    return PLAN_CAMERA_LIMITS.get(normalized, PLAN_CAMERA_LIMITS["trial"])
+
+
+def _candidate_priority(item: dict[str, Any]) -> tuple[int, int, str]:
+    status = str(item.get("status") or "")
+    confidence = str(item.get("confidence") or "low")
+    status_rank = 0 if status == "ok" else 1 if status == "warning" else 2
+    confidence_rank = {"high": 0, "medium": 1, "low": 2}.get(confidence, 3)
+    ip = str(item.get("ip") or "")
+    return status_rank, confidence_rank, ip
+
+
+def build_onboarding_blueprint(
+    scan_results: list[dict[str, Any]],
+    *,
+    plan_code: str = "trial",
+) -> dict[str, Any]:
+    candidates = build_discovery_candidates(scan_results)
+    sorted_candidates = sorted(candidates, key=_candidate_priority)
+    camera_limit = _camera_limit_for_plan(plan_code)
+    selectable_statuses = {"ok", "warning"}
+
+    recommended_ips = [
+        str(item.get("ip") or "")
+        for item in sorted_candidates
+        if item.get("status") in selectable_statuses
+    ][:camera_limit]
+
+    output_candidates: list[dict[str, Any]] = []
+    for item in sorted_candidates:
+        ip = str(item.get("ip") or "")
+        is_selectable = item.get("status") in selectable_statuses
+        output_candidates.append(
+            {
+                **item,
+                "selectable": is_selectable,
+                "recommended": ip in recommended_ips,
+            }
+        )
+
+    return {
+        "method": {"id": "edge_onboarding_blueprint", "version": "v1"},
+        "plan_code": str(plan_code or "trial").strip().lower(),
+        "camera_limit": camera_limit,
+        "candidates": output_candidates,
+        "selection_guidance": {
+            "max_selectable": camera_limit,
+            "recommended_camera_ips": recommended_ips,
+        },
+        "indicators": ONBOARDING_INDICATORS,
+    }
