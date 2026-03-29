@@ -36,6 +36,7 @@ from .activation import AgentState, ConfigManager, bootstrap_activation
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
+from .heartbeat_client import HeartbeatClient, HeartbeatPayload
 from .onboarding_readiness import (
     build_onboarding_readiness,
     export_onboarding_readiness_report,
@@ -68,6 +69,8 @@ WATCHDOG_DEFAULT_RESTART_WINDOW_SECONDS = 600
 WATCHDOG_DEFAULT_RESTART_MAX = 3
 VISION_PROXY_DEFAULT_BUCKET_SECONDS = 30
 VISION_PROXY_DEFAULT_BUCKET_SECONDS = 30
+DEGRADED_HEARTBEAT_INTERVAL_SECONDS = 300
+HEARTBEAT_BACKOFF_MAX_SECONDS = 300
 
 
 def _candidate_install_roots() -> list[Path]:
@@ -785,6 +788,65 @@ def _run_once(
     return 1
 
 
+def _resolve_device_identity(
+    *,
+    activation_config: dict[str, Any] | None,
+    settings: Any,
+    version: str,
+) -> tuple[str, str, str]:
+    cfg = activation_config or {}
+    device_key = str(cfg.get("device_key") or "").strip() or str(settings.agent_id)
+    installed_version = str(cfg.get("installed_version") or "").strip() or str(version or "unknown")
+    update_channel = str(cfg.get("update_channel") or "stable").strip().lower() or "stable"
+    return device_key, installed_version, update_channel
+
+
+def _next_agent_state_after_heartbeat(
+    *,
+    current_state: AgentState,
+    ok: bool,
+    status_code: int | None,
+) -> AgentState:
+    if ok:
+        return AgentState.ACTIVE
+    if status_code in AUTH_FAILURE_STATUSES:
+        return AgentState.ERROR
+    if status_code is None or status_code >= 500:
+        return AgentState.DEGRADED
+    return current_state
+
+
+def _heartbeat_sleep_seconds(
+    *,
+    state: AgentState,
+    active_interval_seconds: int,
+    degraded_interval_seconds: int,
+    backoff_index: int,
+) -> int:
+    if state == AgentState.DEGRADED:
+        base = max(1, int(degraded_interval_seconds))
+        backoff = BACKOFF_SECONDS[min(backoff_index, len(BACKOFF_SECONDS) - 1)]
+        return min(max(base, backoff), HEARTBEAT_BACKOFF_MAX_SECONDS)
+    return max(1, int(active_interval_seconds))
+
+
+def _log_agent_state_transition(
+    *,
+    logger: logging.Logger,
+    current_state: AgentState,
+    next_state: AgentState,
+    reason: str,
+) -> AgentState:
+    if current_state != next_state:
+        logger.info(
+            "[HEARTBEAT] state transition %s -> %s reason=%s",
+            current_state.value,
+            next_state.value,
+            reason,
+        )
+    return next_state
+
+
 def _is_camera_active(camera: dict[str, Any]) -> bool:
     for key in ("active", "is_active", "enabled", "isEnabled"):
         if key in camera:
@@ -1412,9 +1474,23 @@ def main() -> int:
             logger=logger,
         )
 
+    activation_runtime_config = ConfigManager.from_default().load()
+    device_key, installed_version, update_channel = _resolve_device_identity(
+        activation_config=activation_runtime_config,
+        settings=settings,
+        version=version,
+    )
+    current_agent_state = (
+        AgentState.ACTIVE if activation_outcome.state == AgentState.ACTIVE else AgentState.DEGRADED
+    )
+    heartbeat_client = HeartbeatClient()
+    started_at = time.time()
+    degraded_heartbeat_interval_seconds = _parse_int_env(
+        "DEGRADED_HEARTBEAT_INTERVAL_SECONDS",
+        DEGRADED_HEARTBEAT_INTERVAL_SECONDS,
+    )
+
     backoff_index = 0
-    consecutive_failures = 0
-    last_failure_status = None
     consecutive_auth_failures = 0
     last_camera_sync_at = 0.0
     last_update_check_at = 0.0
@@ -1735,13 +1811,23 @@ def main() -> int:
             last_camera_sync_at = now
 
         camera_fields = build_camera_heartbeat_fields(camera_states)
-        ok, status, error = send_heartbeat(
+        cameras_connected = sum(1 for state in camera_states.values() if state.get("status") == "online")
+        heartbeat_payload = HeartbeatPayload(
+            device_key=device_key,
+            installed_version=installed_version,
+            update_channel=update_channel,
+            status=current_agent_state.value if current_agent_state in (AgentState.ACTIVE, AgentState.DEGRADED) else AgentState.ACTIVE.value,
+            uptime_seconds=max(0, int(time.time() - started_at)),
+            cameras_connected=cameras_connected,
+            inference_fps=0.0,
+        )
+        ok, status, error = heartbeat_client.send(
             url=url,
             edge_token=settings.edge_token,
             store_id=settings.store_id,
             agent_id=settings.agent_id,
             version=version,
-            timeout_seconds=REQUEST_TIMEOUT_SECONDS,
+            payload=heartbeat_payload,
             extra_data=camera_fields,
         )
 
@@ -1751,6 +1837,18 @@ def main() -> int:
             if ok:
                 watchdog_state["last_heartbeat_ok_at"] = time.time()
 
+        next_state = _next_agent_state_after_heartbeat(
+            current_state=current_agent_state,
+            ok=ok,
+            status_code=status,
+        )
+        current_agent_state = _log_agent_state_transition(
+            logger=logger,
+            current_state=current_agent_state,
+            next_state=next_state,
+            reason=f"heartbeat_status_{status if status is not None else 'network_error'}",
+        )
+
         if status is None:
             print(f"Heartbeat -> {url} status=ERROR")
         else:
@@ -1759,8 +1857,6 @@ def main() -> int:
         if ok:
             logger.info("Heartbeat -> %s status=%s", url, status)
             backoff_index = 0
-            consecutive_failures = 0
-            last_failure_status = None
             consecutive_auth_failures = 0
             now = time.time()
             if vision_proxy_enabled and now - last_vision_bucket_at >= vision_bucket_seconds:
@@ -1987,11 +2083,14 @@ def main() -> int:
                     finally:
                         release_update_lock(logger=logger, lock_path=lock_path)
                 last_update_check_at = now
-            time.sleep(settings.heartbeat_interval_seconds)
+            sleep_seconds = _heartbeat_sleep_seconds(
+                state=current_agent_state,
+                active_interval_seconds=settings.heartbeat_interval_seconds,
+                degraded_interval_seconds=degraded_heartbeat_interval_seconds,
+                backoff_index=backoff_index,
+            )
+            time.sleep(sleep_seconds)
             continue
-
-        consecutive_failures += 1
-        last_failure_status = status
 
         if status in AUTH_FAILURE_STATUSES:
             consecutive_auth_failures += 1
@@ -2014,27 +2113,20 @@ def main() -> int:
                 print(message)
                 logger.error(message)
                 return EXIT_AUTH_ERROR
-        elif status is not None:
+        elif status is not None and status < 500:
             consecutive_auth_failures = 0
-        if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
-            message = (
-                f"ERRO FATAL: {MAX_CONSECUTIVE_FAILURES} falhas consecutivas. "
-                f"Ultimo status={last_failure_status if last_failure_status is not None else 'ERROR'}. Encerrando."
-            )
-            print(message)
-            logger.error(message)
-            if last_failure_status in AUTH_FAILURE_STATUSES:
-                return EXIT_AUTH_ERROR
-            if last_failure_status is None:
-                return EXIT_NETWORK_ERROR
-            return 1
 
         if error:
             logger.warning("Heartbeat failure: %s", error)
         else:
             logger.warning("Heartbeat failure status=%s", status)
 
-        wait_seconds = BACKOFF_SECONDS[min(backoff_index, len(BACKOFF_SECONDS) - 1)]
+        wait_seconds = _heartbeat_sleep_seconds(
+            state=current_agent_state,
+            active_interval_seconds=settings.heartbeat_interval_seconds,
+            degraded_interval_seconds=degraded_heartbeat_interval_seconds,
+            backoff_index=backoff_index,
+        )
         print(f"Retry in {wait_seconds}s ...")
         logger.info("Retry in %ss", wait_seconds)
         time.sleep(wait_seconds)

@@ -19,6 +19,7 @@ class AgentState(str, Enum):
     UNPROVISIONED = "unprovisioned"
     ACTIVATING = "activating"
     ACTIVE = "active"
+    DEGRADED = "degraded"
     ERROR = "error"
 
 
