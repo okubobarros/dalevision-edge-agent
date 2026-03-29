@@ -68,3 +68,53 @@ def run_scan(*, logger: logging.Logger) -> list[dict[str, Any]]:
     if not results:
         logger.info("NETSCAN nenhum candidato encontrado")
     return results
+
+
+def build_discovery_candidates(scan_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Normalize raw scan results for onboarding consumption.
+    Output contract:
+      - status: ok|warning|fail
+      - reason_code: deterministic reason for UX guidance
+    """
+    normalized: list[dict[str, Any]] = []
+    for item in scan_results or []:
+        ip = str(item.get("ip") or "").strip()
+        ports_raw = item.get("ports") or []
+        ports = [int(p) for p in ports_raw if isinstance(p, int) or str(p).isdigit()]
+        confidence = str(item.get("confidence") or "low")
+        status = "warning"
+        reason_code = "camera_discovered_limited_signal"
+
+        has_rtsp = 554 in ports
+        has_nvr = 37777 in ports
+        has_http = 80 in ports or 443 in ports
+
+        if has_rtsp:
+            status = "ok"
+            reason_code = "rtsp_port_open"
+        elif has_nvr:
+            status = "warning"
+            reason_code = "nvr_port_open_rtsp_unknown"
+        elif has_http:
+            status = "warning"
+            reason_code = "http_only_device"
+        else:
+            status = "fail"
+            reason_code = "no_supported_ports"
+
+        normalized.append(
+            {
+                "ip": ip,
+                "ports": sorted(ports),
+                "confidence": confidence,
+                "status": status,
+                "reason_code": reason_code,
+            }
+        )
+
+    return normalized
+
+
+def run_discovery(*, logger: logging.Logger) -> list[dict[str, Any]]:
+    return build_discovery_candidates(run_scan(logger=logger))

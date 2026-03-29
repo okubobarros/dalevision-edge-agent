@@ -36,7 +36,7 @@ from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
 from .rtsp_test import test_rtsp, test_rtsp_channels
-from .scan import run_scan
+from .scan import run_discovery, run_scan
 from .update import (
     apply_update_if_possible,
     acquire_update_lock,
@@ -993,10 +993,13 @@ def main() -> int:
         return _run_install_service_command(logger=logger)
 
     if args.command == "scan":
-        results = run_scan(logger=logger)
+        results = run_discovery(logger=logger)
         print("Scan results:")
         for item in results:
-            print(f"- {item['ip']} ports={item['ports']} confidence={item['confidence']}")
+            print(
+                f"- {item['ip']} ports={item['ports']} confidence={item['confidence']} "
+                f"status={item.get('status')} reason={item.get('reason_code')}"
+            )
         return 0
 
     if args.command == "test-rtsp":
