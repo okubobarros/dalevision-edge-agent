@@ -9,6 +9,7 @@ def test_setup_api_health_response():
     assert code == 200
     assert payload["ok"] is True
     assert payload["service"] == "edge_setup_api"
+    assert payload["capabilities"]["onboarding_installation_check"] is True
 
 
 def test_setup_api_blueprint_response_uses_plan_and_scan_results():

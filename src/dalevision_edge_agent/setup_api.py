@@ -28,6 +28,11 @@ def build_setup_api_response(
             "ok": True,
             "service": "edge_setup_api",
             "status": "online",
+            "capabilities": {
+                "onboarding_blueprint": True,
+                "onboarding_readiness": True,
+                "onboarding_installation_check": True,
+            },
         }
 
     if route == "/onboarding/blueprint":
