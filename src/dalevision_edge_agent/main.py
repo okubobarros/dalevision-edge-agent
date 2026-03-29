@@ -32,6 +32,7 @@ from .cameras import (
     send_camera_health_event,
     send_vision_metrics_event,
 )
+from .activation import AgentState, ConfigManager, bootstrap_activation
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
@@ -427,6 +428,12 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Run smoke test for N seconds (heartbeat + camera_health from CAMERAS_JSON) and exit",
+    )
+    parser.add_argument(
+        "--activation-token",
+        dest="activation_token",
+        default=None,
+        help="Activation token for first bootstrap (persisted into agent_config.json).",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -1142,6 +1149,35 @@ def main() -> int:
             else:
                 print(f"❌ RTSP FAIL: {result.get('message')}")
         return 0
+
+    # Activation bootstrap (PR4): optional and backward compatible with legacy .env.
+    activation_cloud_base_url = (
+        os.getenv("CLOUD_BASE_URL")
+        or os.getenv("DALE_CLOUD_BASE_URL")
+        or ""
+    ).strip()
+    try:
+        activation_config = ConfigManager.from_default().load()
+    except Exception:
+        activation_config = {}
+    if not activation_cloud_base_url:
+        activation_cloud_base_url = str(activation_config.get("cloud_base_url") or "").strip()
+
+    activation_outcome = bootstrap_activation(
+        logger=logger,
+        cloud_base_url=activation_cloud_base_url,
+        installed_version=_get_version(),
+        activation_token=args.activation_token,
+    )
+    if activation_outcome.result and activation_outcome.result.ok:
+        logger.info(
+            "[ACTIVATION] bootstrap success store_id=%s device_id=%s",
+            str(activation_outcome.config.get("store_id") or ""),
+            str(activation_outcome.config.get("edge_device_id") or ""),
+        )
+    elif activation_outcome.state == AgentState.ERROR:
+        logger.error("[ACTIVATION] bootstrap entered error state; aborting startup.")
+        return EXIT_CONFIG_ERROR
 
     try:
         settings = load_settings()
