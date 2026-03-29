@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .onboarding_readiness import build_onboarding_readiness
 from .scan import build_onboarding_blueprint
 
 
@@ -36,6 +37,21 @@ def build_setup_api_response(
             "ok": True,
             **payload,
         }
+
+    if route == "/onboarding/readiness":
+        plan_code = (query.get("plan") or ["trial"])[0]
+        include_scan = (query.get("scan") or ["0"])[0].strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        payload = build_onboarding_readiness(
+            plan_code=plan_code,
+            include_scan=include_scan,
+            discovery_provider=discovery_provider,
+        )
+        return 200, payload
 
     return 404, {
         "ok": False,

@@ -41,3 +41,32 @@ def test_setup_api_not_found_response():
     assert code == 404
     assert payload["ok"] is False
     assert payload["error"] == "not_found"
+
+
+def test_setup_api_readiness_response_uses_readiness_builder(monkeypatch):
+    captured: dict = {}
+
+    def fake_builder(*, plan_code: str, include_scan: bool, discovery_provider):
+        captured["plan_code"] = plan_code
+        captured["include_scan"] = include_scan
+        captured["provider"] = callable(discovery_provider)
+        return {"ok": True, "status": "ready", "checks": []}
+
+    monkeypatch.setattr(
+        "dalevision_edge_agent.setup_api.build_onboarding_readiness",
+        fake_builder,
+    )
+
+    code, payload = build_setup_api_response(
+        path="/onboarding/readiness?plan=trial&scan=1",
+        discovery_provider=lambda: [],
+    )
+
+    assert code == 200
+    assert payload["ok"] is True
+    assert payload["status"] == "ready"
+    assert captured == {
+        "plan_code": "trial",
+        "include_scan": True,
+        "provider": True,
+    }

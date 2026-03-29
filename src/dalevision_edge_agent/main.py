@@ -35,6 +35,7 @@ from .cameras import (
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
+from .onboarding_readiness import build_onboarding_readiness
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import build_onboarding_blueprint, run_discovery, run_scan
 from .setup_api import serve_setup_api
@@ -454,6 +455,14 @@ def _parse_args() -> argparse.Namespace:
     )
     onboarding_parser.add_argument("--plan", default="trial")
     onboarding_parser.add_argument("--json", action="store_true")
+
+    onboarding_readiness_parser = subparsers.add_parser(
+        "onboarding-readiness",
+        help="Validate onboarding readiness (env, config and optional scan)",
+    )
+    onboarding_readiness_parser.add_argument("--plan", default="trial")
+    onboarding_readiness_parser.add_argument("--scan", action="store_true")
+    onboarding_readiness_parser.add_argument("--json", action="store_true")
 
     setup_api_parser = subparsers.add_parser("setup-api", help="Run local setup API for onboarding")
     setup_api_parser.add_argument("--host", default="127.0.0.1")
@@ -1032,6 +1041,36 @@ def main() -> int:
                 required_label = "required" if indicator.get("required") else "optional"
                 print(
                     f"- {indicator['key']} ({indicator['roi_shape']}, {required_label})"
+                )
+        return 0
+
+    if args.command == "onboarding-readiness":
+        payload = build_onboarding_readiness(
+            plan_code=args.plan,
+            include_scan=bool(args.scan),
+            discovery_provider=lambda: run_scan(logger=logger),
+        )
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            summary = payload.get("summary") or {}
+            print(
+                f"status={payload.get('status')} checks_ok={summary.get('checks_ok')} "
+                f"warnings={summary.get('checks_warning')} fails={summary.get('checks_fail')}"
+            )
+            if summary.get("missing_required_env"):
+                print("Missing env:")
+                for key in summary.get("missing_required_env") or []:
+                    print(f"- {key}")
+            plan = payload.get("plan") or {}
+            print(
+                f"Plan={plan.get('plan_code')} camera_limit={plan.get('camera_limit')}"
+            )
+            discovery = payload.get("discovery") or {}
+            if discovery.get("executed"):
+                print(
+                    f"Scan candidates={discovery.get('detected_count')} "
+                    f"recommended={discovery.get('recommended_count')}"
                 )
         return 0
 
