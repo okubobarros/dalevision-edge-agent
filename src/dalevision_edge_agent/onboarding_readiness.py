@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 import os
 import shutil
 from pathlib import Path
@@ -158,3 +160,85 @@ def build_onboarding_readiness(
         "checks": checks,
     }
 
+
+def render_onboarding_readiness_markdown(
+    payload: dict[str, Any],
+    *,
+    generated_at: Optional[str] = None,
+) -> str:
+    generated = generated_at or datetime.now(timezone.utc).isoformat()
+    summary = payload.get("summary") or {}
+    plan = payload.get("plan") or {}
+    discovery = payload.get("discovery") or {}
+    checks = payload.get("checks") or []
+    missing_env = summary.get("missing_required_env") or []
+
+    lines: list[str] = [
+        "# DaleVision Edge Onboarding Readiness Report",
+        "",
+        f"- generated_at_utc: {generated}",
+        f"- status: {payload.get('status')}",
+        f"- checks_ok: {summary.get('checks_ok', 0)}",
+        f"- checks_warning: {summary.get('checks_warning', 0)}",
+        f"- checks_fail: {summary.get('checks_fail', 0)}",
+        f"- plan_code: {plan.get('plan_code')}",
+        f"- camera_limit: {plan.get('camera_limit')}",
+        "",
+        "## Discovery",
+        "",
+        f"- executed: {discovery.get('executed')}",
+        f"- detected_count: {discovery.get('detected_count', 0)}",
+        f"- recommended_count: {discovery.get('recommended_count', 0)}",
+    ]
+    recommended_ips = discovery.get("recommended_camera_ips") or []
+    if recommended_ips:
+        lines.append(f"- recommended_camera_ips: {', '.join(str(ip) for ip in recommended_ips)}")
+    else:
+        lines.append("- recommended_camera_ips: none")
+
+    lines.extend(["", "## Missing Env", ""])
+    if missing_env:
+        for key in missing_env:
+            lines.append(f"- {key}")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Checks", ""])
+    for item in checks:
+        lines.append(
+            f"- {item.get('key')}: status={item.get('status')} reason={item.get('reason_code')} message={item.get('message')}"
+        )
+    if not checks:
+        lines.append("- none")
+
+    return "\n".join(lines) + "\n"
+
+
+def export_onboarding_readiness_report(
+    payload: dict[str, Any],
+    *,
+    export_json_path: str = "",
+    export_markdown_path: str = "",
+    generated_at: Optional[str] = None,
+) -> dict[str, str]:
+    output_paths: dict[str, str] = {}
+
+    if export_json_path:
+        json_target = Path(export_json_path).expanduser().resolve()
+        json_target.parent.mkdir(parents=True, exist_ok=True)
+        json_target.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        output_paths["json"] = str(json_target)
+
+    if export_markdown_path:
+        markdown_target = Path(export_markdown_path).expanduser().resolve()
+        markdown_target.parent.mkdir(parents=True, exist_ok=True)
+        markdown_target.write_text(
+            render_onboarding_readiness_markdown(payload, generated_at=generated_at),
+            encoding="utf-8",
+        )
+        output_paths["markdown"] = str(markdown_target)
+
+    return output_paths

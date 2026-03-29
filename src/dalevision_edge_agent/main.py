@@ -35,7 +35,10 @@ from .cameras import (
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
-from .onboarding_readiness import build_onboarding_readiness
+from .onboarding_readiness import (
+    build_onboarding_readiness,
+    export_onboarding_readiness_report,
+)
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import build_onboarding_blueprint, run_discovery, run_scan
 from .setup_api import serve_setup_api
@@ -463,6 +466,18 @@ def _parse_args() -> argparse.Namespace:
     onboarding_readiness_parser.add_argument("--plan", default="trial")
     onboarding_readiness_parser.add_argument("--scan", action="store_true")
     onboarding_readiness_parser.add_argument("--json", action="store_true")
+    onboarding_readiness_parser.add_argument(
+        "--export-json",
+        dest="export_json",
+        default="",
+        help="Optional output path for readiness JSON report",
+    )
+    onboarding_readiness_parser.add_argument(
+        "--export-md",
+        dest="export_md",
+        default="",
+        help="Optional output path for readiness Markdown report",
+    )
 
     setup_api_parser = subparsers.add_parser("setup-api", help="Run local setup API for onboarding")
     setup_api_parser.add_argument("--host", default="127.0.0.1")
@@ -1050,6 +1065,11 @@ def main() -> int:
             include_scan=bool(args.scan),
             discovery_provider=lambda: run_scan(logger=logger),
         )
+        output_paths = export_onboarding_readiness_report(
+            payload,
+            export_json_path=str(args.export_json or ""),
+            export_markdown_path=str(args.export_md or ""),
+        )
         if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
         else:
@@ -1072,6 +1092,12 @@ def main() -> int:
                     f"Scan candidates={discovery.get('detected_count')} "
                     f"recommended={discovery.get('recommended_count')}"
                 )
+            if output_paths:
+                print("Reports exported:")
+                if output_paths.get("json"):
+                    print(f"- json: {output_paths['json']}")
+                if output_paths.get("markdown"):
+                    print(f"- markdown: {output_paths['markdown']}")
         return 0
 
     if args.command == "setup-api":
