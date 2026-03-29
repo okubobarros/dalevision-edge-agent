@@ -53,13 +53,24 @@ def serve_setup_api(
     logger = logger or logging.getLogger(__name__)
 
     class Handler(BaseHTTPRequestHandler):
+        def _set_cors_headers(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
         def _write_json(self, code: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self._set_cors_headers()
             self.end_headers()
             self.wfile.write(body)
+
+        def do_OPTIONS(self):  # noqa: N802
+            self.send_response(204)
+            self._set_cors_headers()
+            self.end_headers()
 
         def do_GET(self):  # noqa: N802
             code, payload = build_setup_api_response(
