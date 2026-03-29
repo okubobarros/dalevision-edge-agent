@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .installation_check import build_installation_check_payload
 from .onboarding_readiness import build_onboarding_readiness
 from .scan import build_onboarding_blueprint
 
@@ -51,6 +52,10 @@ def build_setup_api_response(
             include_scan=include_scan,
             discovery_provider=discovery_provider,
         )
+        return 200, payload
+
+    if route == "/onboarding/installation-check":
+        payload = build_installation_check_payload()
         return 200, payload
 
     return 404, {

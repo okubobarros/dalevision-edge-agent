@@ -70,3 +70,26 @@ def test_setup_api_readiness_response_uses_readiness_builder(monkeypatch):
         "include_scan": True,
         "provider": True,
     }
+
+
+def test_setup_api_installation_check_response_uses_builder(monkeypatch):
+    captured: dict = {}
+
+    def fake_builder():
+        captured["called"] = True
+        return {"ok": True, "status": "ready", "checks": []}
+
+    monkeypatch.setattr(
+        "dalevision_edge_agent.setup_api.build_installation_check_payload",
+        fake_builder,
+    )
+
+    code, payload = build_setup_api_response(
+        path="/onboarding/installation-check",
+        discovery_provider=lambda: [],
+    )
+
+    assert code == 200
+    assert payload["ok"] is True
+    assert payload["status"] == "ready"
+    assert captured == {"called": True}
