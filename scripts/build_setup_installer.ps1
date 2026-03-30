@@ -21,15 +21,17 @@ if ([string]::IsNullOrWhiteSpace($versionNoV)) {
   $versionNoV = "0.0.0"
 }
 
-$resolvedSource = if ([string]::IsNullOrWhiteSpace($SourceDir)) { Join-Path $repoRoot "release\win" } else { $SourceDir }
-$resolvedOutput = if ([string]::IsNullOrWhiteSpace($OutputDir)) { $repoRoot } else { $OutputDir }
+$resolvedSourceRaw = if ([string]::IsNullOrWhiteSpace($SourceDir)) { Join-Path $repoRoot "release\win" } else { $SourceDir }
+$resolvedOutputRaw = if ([string]::IsNullOrWhiteSpace($OutputDir)) { $repoRoot } else { $OutputDir }
 
-if (-not (Test-Path $resolvedSource)) {
-  throw "SourceDir not found: $resolvedSource"
+if (-not (Test-Path $resolvedSourceRaw)) {
+  throw "SourceDir not found: $resolvedSourceRaw"
 }
-if (-not (Test-Path $resolvedOutput)) {
-  New-Item -ItemType Directory -Path $resolvedOutput -Force | Out-Null
+if (-not (Test-Path $resolvedOutputRaw)) {
+  New-Item -ItemType Directory -Path $resolvedOutputRaw -Force | Out-Null
 }
+$resolvedSource = (Resolve-Path $resolvedSourceRaw).Path
+$resolvedOutput = (Resolve-Path $resolvedOutputRaw).Path
 
 $iscc = $InnoCompilerPath
 if ([string]::IsNullOrWhiteSpace($iscc)) {
