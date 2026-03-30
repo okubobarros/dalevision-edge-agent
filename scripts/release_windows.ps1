@@ -86,6 +86,7 @@ $requiredSources = @(
   @{ Path = (Join-Path $releaseRoot "Diagnose.bat"); Label = "Diagnose.bat" },
   @{ Path = (Join-Path $releaseRoot "run_agent.cmd"); Label = "run_agent.cmd" },
   @{ Path = (Join-Path $releaseRoot "run_agent.vbs"); Label = "run_agent.vbs" },
+  @{ Path = (Join-Path $releaseRoot "DaleVisionEdgeSetup.iss"); Label = "DaleVisionEdgeSetup.iss" },
   @{ Path = (Join-Path $repoRoot "scripts\install-service.ps1"); Label = "install-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\install-user.ps1"); Label = "install-user.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\uninstall-service.ps1"); Label = "uninstall-service.ps1" },
@@ -118,6 +119,7 @@ Copy-Item (Join-Path $releaseRoot "05_PARAR_AGENTE_E_LIBERAR_PASTA.bat") (Join-P
 Copy-Item (Join-Path $releaseRoot "Diagnose.bat") (Join-Path $releaseWin "Diagnose.bat") -Force
 Copy-Item (Join-Path $releaseRoot "run_agent.cmd") (Join-Path $releaseWin "run_agent.cmd") -Force
 Copy-Item (Join-Path $releaseRoot "run_agent.vbs") (Join-Path $releaseWin "run_agent.vbs") -Force
+Copy-Item (Join-Path $releaseRoot "DaleVisionEdgeSetup.iss") (Join-Path $releaseWin "DaleVisionEdgeSetup.iss") -Force
 
 # 3.5) gerar .env a partir do template
 Copy-Item $envTemplatePath (Join-Path $releaseWin ".env") -Force

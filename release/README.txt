@@ -1,5 +1,9 @@
 DALE Vision — Edge Agent (Windows)
 
+DISTRIBUICAO RECOMENDADA
+- Preferencial: DaleVisionEdgeSetup-vX.Y.Z.exe (instalacao 1 clique, sem admin).
+- Fallback tecnico: dalevision-edge-agent-windows.zip.
+
 PASSO 1: CONFIGURAR
 1) Edite o arquivo .env (copie para %%APPDATA%%\DaleVision\.env se necessario).
 2) Preencha STORE_ID, EDGE_TOKEN e DASHBOARD_URL.

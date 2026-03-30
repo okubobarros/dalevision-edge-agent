@@ -50,6 +50,8 @@ $cacheDir = Join-Path $dvLocal "cache"
 $configDir = Join-Path $roam "DaleVision"
 $startupDir = Join-Path $roam "Microsoft\Windows\Start Menu\Programs\Startup"
 $startupLink = Join-Path $startupDir "DaleVision Edge Agent.lnk"
+$desktopDir = [Environment]::GetFolderPath("Desktop")
+$configShortcut = Join-Path $desktopDir "DaleVision Config.lnk"
 
 Ensure-Dir $appRoot
 Ensure-Dir $logDir
@@ -117,6 +119,14 @@ $shortcut.Description = "DaleVision Edge Agent"
 $shortcut.IconLocation = (Join-Path $targetRoot "dalevision-edge-agent.exe")
 $shortcut.Save()
 Write-Log "INSTALL005 startup_link=$startupLink"
+
+$cfgShortcut = $wsh.CreateShortcut($configShortcut)
+$cfgShortcut.TargetPath = "$env:WINDIR\System32\notepad.exe"
+$cfgShortcut.Arguments = "`"$envTarget`""
+$cfgShortcut.WorkingDirectory = $configDir
+$cfgShortcut.Description = "DaleVision Config"
+$cfgShortcut.Save()
+Write-Log "INSTALL005B config_shortcut=$configShortcut"
 
 $installInfo = @{
   version = $versionSafe

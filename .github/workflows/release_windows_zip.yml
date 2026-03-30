@@ -1,4 +1,4 @@
-name: Release Windows ZIP
+name: Release Windows
 
 on:
   push:
@@ -53,9 +53,21 @@ jobs:
         run: |
           .\scripts\release_windows.ps1 -Version $env:GITHUB_REF_NAME
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+
+      - name: Build Setup EXE
+        shell: pwsh
+        run: |
+          .\scripts\build_setup_installer.ps1 -Version $env:GITHUB_REF_NAME -SourceDir ".\release\win" -OutputDir "."
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dalevision-edge-agent-windows.zip
+          files: |
+            dalevision-edge-agent-windows.zip
+            DaleVisionEdgeSetup-*.exe
           name: ${{ github.ref_name }}
           generate_release_notes: true

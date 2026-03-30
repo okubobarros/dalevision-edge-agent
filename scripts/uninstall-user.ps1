@@ -25,6 +25,8 @@ $logDir = Join-Path $dvLocal "logs"
 $cacheDir = Join-Path $dvLocal "cache"
 $configDir = Join-Path $roam "DaleVision"
 $startupLink = Join-Path $roam "Microsoft\Windows\Start Menu\Programs\Startup\DaleVision Edge Agent.lnk"
+$desktopDir = [Environment]::GetFolderPath("Desktop")
+$configShortcut = Join-Path $desktopDir "DaleVision Config.lnk"
 
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $script:LogPath = Join-Path $logDir "uninstall-user.log"
@@ -56,6 +58,10 @@ if (Test-Path $startupLink) {
   Write-Log "UNINSTALL004 startup_link_removed path=$startupLink"
 } else {
   Write-Log "UNINSTALL004 startup_link_missing"
+}
+if (Test-Path $configShortcut) {
+  Remove-Item -Path $configShortcut -Force -ErrorAction SilentlyContinue
+  Write-Log "UNINSTALL004B config_shortcut_removed path=$configShortcut"
 }
 
 # Legacy cleanup (best effort).
