@@ -23,7 +23,9 @@ SolidCompression=yes
 OutputDir={#OutputDir}
 OutputBaseFilename=DaleVisionEdgeSetup-v{#AppVersion}
 PrivilegesRequired=lowest
+#ifexist "{#SourceDir}\dalevision-edge-agent.exe"
 SetupIconFile={#SourceDir}\dalevision-edge-agent.exe
+#endif
 Uninstallable=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
