@@ -1,6 +1,9 @@
 param(
   [string]$SourceRoot = (Split-Path -Parent $PSScriptRoot),
-  [string]$Version = ""
+  [string]$Version = "",
+  [string]$ActivationToken = "",
+  [string]$ActivationTokenFile = "",
+  [string]$CloudBaseUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +38,38 @@ function Ensure-Dir {
   if (-not (Test-Path $Path)) {
     New-Item -ItemType Directory -Path $Path -Force | Out-Null
   }
+}
+
+function Resolve-ActivationToken {
+  param(
+    [string]$Token,
+    [string]$TokenFile
+  )
+  if (-not [string]::IsNullOrWhiteSpace($Token)) {
+    return $Token.Trim()
+  }
+  if (-not [string]::IsNullOrWhiteSpace($TokenFile) -and (Test-Path $TokenFile)) {
+    try {
+      $raw = Get-Content -Path $TokenFile -Raw -ErrorAction Stop
+      $candidate = [string]($raw -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
+      if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+        return $candidate.Trim()
+      }
+    } catch {}
+  }
+  return ""
+}
+
+function Get-MaskedToken {
+  param([string]$Token)
+  if ([string]::IsNullOrWhiteSpace($Token)) {
+    return ""
+  }
+  $t = $Token.Trim()
+  if ($t.Length -le 8) {
+    return "****"
+  }
+  return "{0}...{1}" -f $t.Substring(0, 4), $t.Substring($t.Length - 4, 4)
 }
 
 $local = $env:LOCALAPPDATA
@@ -92,6 +127,35 @@ $rc = $LASTEXITCODE
 Write-Log "INSTALL003 robocopy_exit=$rc"
 if ($rc -ge 8) {
   throw "Falha ao copiar pacote para pasta operacional. robocopy_exit=$rc"
+}
+
+$tokenResolved = Resolve-ActivationToken -Token $ActivationToken -TokenFile $ActivationTokenFile
+$agentConfigPath = Join-Path $configDir "agent_config.json"
+if (-not (Test-Path $agentConfigPath)) {
+  "{}" | Set-Content -Path $agentConfigPath -Encoding UTF8
+}
+try {
+  $agentConfigRaw = Get-Content -Path $agentConfigPath -Raw -ErrorAction Stop
+  $agentConfigObj = ConvertFrom-Json -InputObject $agentConfigRaw -ErrorAction Stop
+  $agentConfig = @{}
+  if ($null -ne $agentConfigObj) {
+    foreach ($prop in $agentConfigObj.PSObject.Properties) {
+      $agentConfig[$prop.Name] = $prop.Value
+    }
+  }
+} catch {
+  $agentConfig = @{}
+}
+if (-not [string]::IsNullOrWhiteSpace($tokenResolved)) {
+  $agentConfig["activation_token"] = $tokenResolved
+  Write-Log ("INSTALL003B activation_token_seeded token={0}" -f (Get-MaskedToken -Token $tokenResolved))
+}
+if (-not [string]::IsNullOrWhiteSpace($CloudBaseUrl)) {
+  $agentConfig["cloud_base_url"] = $CloudBaseUrl.Trim()
+  Write-Log ("INSTALL003C cloud_base_url_set value={0}" -f $CloudBaseUrl.Trim())
+}
+if ($agentConfig.Count -gt 0) {
+  $agentConfig | ConvertTo-Json -Depth 4 | Set-Content -Path $agentConfigPath -Encoding UTF8
 }
 
 $envTarget = Join-Path $configDir ".env"

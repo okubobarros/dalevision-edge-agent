@@ -36,6 +36,5 @@ Source: "{#SourceDir}\*"; DestDir: "{tmp}\dalevision_payload"; Flags: recursesub
 
 [Run]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\dalevision_payload\scripts\install-user.ps1"" -SourceRoot ""{tmp}\dalevision_payload"" -Version ""{#AppVersion}"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\dalevision_payload\scripts\install-user.ps1"" -SourceRoot ""{tmp}\dalevision_payload"" -Version ""{#AppVersion}"" -ActivationToken ""{param:ACTIVATION_TOKEN|}"" -ActivationTokenFile ""{param:ACTIVATION_TOKEN_FILE|}"" -CloudBaseUrl ""{param:CLOUD_BASE_URL|}"""; \
   Flags: runhidden waituntilterminated
-

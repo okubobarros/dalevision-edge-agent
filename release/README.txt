@@ -4,6 +4,15 @@ DISTRIBUICAO RECOMENDADA
 - Preferencial: DaleVisionEdgeSetup-vX.Y.Z.exe (instalacao 1 clique, sem admin).
 - Fallback tecnico: dalevision-edge-agent-windows.zip.
 
+SETUP.EXE COM TOKEN (RECOMENDADO NO ONBOARDING)
+- O instalador aceita token por parametro e grava em %%APPDATA%%\DaleVision\agent_config.json.
+- Exemplo (token direto):
+  DaleVisionEdgeSetup-vX.Y.Z.exe /ACTIVATION_TOKEN=SEU_TOKEN
+- Exemplo (token em arquivo):
+  DaleVisionEdgeSetup-vX.Y.Z.exe /ACTIVATION_TOKEN_FILE="C:\temp\dalevision-token.txt"
+- Opcional (forcar API no instalador):
+  DaleVisionEdgeSetup-vX.Y.Z.exe /ACTIVATION_TOKEN=SEU_TOKEN /CLOUD_BASE_URL=https://api.dalevision.com
+
 PASSO 1: CONFIGURAR
 1) Edite o arquivo .env (copie para %%APPDATA%%\DaleVision\.env se necessario).
 2) Preencha STORE_ID, EDGE_TOKEN e DASHBOARD_URL.
