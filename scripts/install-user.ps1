@@ -72,6 +72,60 @@ function Get-MaskedToken {
   return "{0}...{1}" -f $t.Substring(0, 4), $t.Substring($t.Length - 4, 4)
 }
 
+function Stop-ExistingDaleVisionProcesses {
+  try {
+    $candidates = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+      ($_.Name -match "dalevision-edge-agent\.exe") -or
+      (
+        ($_.Name -match "powershell\.exe|pwsh\.exe|cmd\.exe") -and
+        ($_.CommandLine -match "Start_DaleVision_Agent\.ps1|DaleVision\\app\\")
+      )
+    }
+    foreach ($proc in $candidates) {
+      try {
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+        Write-Log ("INSTALL000A process_stopped pid={0} name={1}" -f $proc.ProcessId, $proc.Name)
+      } catch {
+        Write-Log ("INSTALL000B process_stop_failed pid={0} name={1} err={2}" -f $proc.ProcessId, $proc.Name, $_.Exception.Message)
+      }
+    }
+    Start-Sleep -Milliseconds 800
+  } catch {
+    Write-Log ("INSTALL000C process_scan_failed err={0}" -f $_.Exception.Message)
+  }
+}
+
+function Upsert-EnvValue {
+  param(
+    [string]$EnvPath,
+    [string]$Key,
+    [string]$Value
+  )
+  if ([string]::IsNullOrWhiteSpace($EnvPath) -or [string]::IsNullOrWhiteSpace($Key)) {
+    return
+  }
+  $lines = @()
+  if (Test-Path $EnvPath) {
+    try {
+      $lines = Get-Content -Path $EnvPath -Encoding UTF8
+    } catch {
+      $lines = @()
+    }
+  }
+  $updated = $false
+  for ($i = 0; $i -lt $lines.Count; $i++) {
+    if ($lines[$i] -match "^\s*$Key=") {
+      $lines[$i] = "$Key=$Value"
+      $updated = $true
+      break
+    }
+  }
+  if (-not $updated) {
+    $lines += "$Key=$Value"
+  }
+  $lines | Set-Content -Path $EnvPath -Encoding UTF8
+}
+
 $local = $env:LOCALAPPDATA
 $roam = $env:APPDATA
 if ([string]::IsNullOrWhiteSpace($local) -or [string]::IsNullOrWhiteSpace($roam)) {
@@ -96,6 +150,14 @@ Ensure-Dir $startupDir
 
 $script:LogPath = Join-Path $logDir "install-user.log"
 Write-Log "INSTALL001 start source=$SourceRoot"
+Stop-ExistingDaleVisionProcesses
+
+try {
+  schtasks /Delete /TN "DaleVisionEdgeAgentUser" /F *> $null
+  Write-Log "INSTALL001B removed_legacy_schtask=DaleVisionEdgeAgentUser"
+} catch {
+  Write-Log ("INSTALL001C legacy_schtask_not_removed err={0}" -f $_.Exception.Message)
+}
 
 if (-not (Test-Path $SourceRoot)) {
   throw "SourceRoot nao encontrado: $SourceRoot"
@@ -167,6 +229,54 @@ if (-not (Test-Path $envTarget)) {
   } else {
     New-Item -ItemType File -Path $envTarget -Force | Out-Null
     Write-Log "INSTALL004 env_created target=$envTarget"
+  }
+}
+if (-not [string]::IsNullOrWhiteSpace($CloudBaseUrl)) {
+  Upsert-EnvValue -EnvPath $envTarget -Key "CLOUD_BASE_URL" -Value $CloudBaseUrl.Trim()
+}
+
+if (-not [string]::IsNullOrWhiteSpace($tokenResolved) -and -not [string]::IsNullOrWhiteSpace($CloudBaseUrl)) {
+  try {
+    $deviceKey = ""
+    if ($agentConfig.ContainsKey("device_key")) {
+      $deviceKey = [string]$agentConfig["device_key"]
+    }
+    if ([string]::IsNullOrWhiteSpace($deviceKey)) {
+      $suffix = [Guid]::NewGuid().ToString("N").Substring(0, 12)
+      $deviceKey = ("edge-{0}-{1}" -f $env:COMPUTERNAME, $suffix).ToLower()
+    }
+    $activationBody = @{
+      activation_token = $tokenResolved
+      device_key = $deviceKey
+      installed_version = $versionSafe
+      update_channel = "stable"
+    } | ConvertTo-Json
+    $activateUrl = ($CloudBaseUrl.TrimEnd("/") + "/api/v1/stores/activate/")
+    $activateResp = Invoke-RestMethod -Method Post -Uri $activateUrl -ContentType "application/json" -Body $activationBody -TimeoutSec 20
+    if ($activateResp -and $activateResp.ok -eq $true) {
+      $storeId = [string]$activateResp.store_id
+      $edgeToken = [string]$activateResp.edge_token
+      if (-not [string]::IsNullOrWhiteSpace($storeId) -and -not [string]::IsNullOrWhiteSpace($edgeToken)) {
+        $agentConfig["store_id"] = $storeId
+        $agentConfig["edge_token"] = $edgeToken
+        $agentConfig["device_key"] = [string]$activateResp.device_key
+        $agentConfig["edge_device_id"] = [string]$activateResp.device_id
+        $agentConfig["installed_version"] = [string]$activateResp.installed_version
+        $agentConfig["update_channel"] = [string]$activateResp.update_channel
+        $agentConfig.Remove("activation_token")
+        $agentConfig | ConvertTo-Json -Depth 4 | Set-Content -Path $agentConfigPath -Encoding UTF8
+
+        Upsert-EnvValue -EnvPath $envTarget -Key "STORE_ID" -Value $storeId
+        Upsert-EnvValue -EnvPath $envTarget -Key "EDGE_TOKEN" -Value $edgeToken
+        Write-Log ("INSTALL004B activation_bootstrap_ok store_id={0} device_key={1}" -f $storeId, [string]$activateResp.device_key)
+      } else {
+        Write-Log "INSTALL004C activation_bootstrap_missing_fields"
+      }
+    } else {
+      Write-Log "INSTALL004D activation_bootstrap_response_not_ok"
+    }
+  } catch {
+    Write-Log ("INSTALL004E activation_bootstrap_failed err={0}" -f $_.Exception.Message)
   }
 }
 
