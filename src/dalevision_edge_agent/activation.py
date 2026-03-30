@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from typing import Any, Optional
 import uuid
 
@@ -14,6 +15,7 @@ import requests
 DEFAULT_CONFIG_FILENAME = "agent_config.json"
 ACTIVATE_ENDPOINT = "/api/v1/stores/activate/"
 REQUEST_TIMEOUT_SECONDS = 10
+_ENV_LINE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 
 class AgentState(str, Enum):
@@ -169,6 +171,88 @@ class ActivationBootstrapOutcome:
     result: Optional[ActivationResult]
 
 
+def hydrate_runtime_env_from_activation_config(
+    *,
+    logger: logging.Logger,
+    config: dict[str, Any],
+    env_path: Optional[Path] = None,
+) -> bool:
+    cloud_base_url = str(config.get("cloud_base_url") or "").strip()
+    store_id = str(config.get("store_id") or "").strip()
+    edge_token = str(config.get("edge_token") or "").strip()
+    agent_id = str(config.get("agent_id") or "").strip()
+    if not cloud_base_url or not store_id or not edge_token:
+        logger.warning(
+            "[ACTIVATION] missing activation bootstrap fields for env hydration "
+            "(cloud=%s store=%s token=%s)",
+            bool(cloud_base_url),
+            bool(store_id),
+            bool(edge_token),
+        )
+        return False
+
+    os.environ["CLOUD_BASE_URL"] = cloud_base_url
+    os.environ["STORE_ID"] = store_id
+    os.environ["EDGE_TOKEN"] = edge_token
+    os.environ["DALE_CLOUD_BASE_URL"] = cloud_base_url
+    os.environ["DALE_STORE_ID"] = store_id
+    os.environ["DALE_EDGE_TOKEN"] = edge_token
+    if agent_id:
+        os.environ["AGENT_ID"] = agent_id
+        os.environ["DALE_AGENT_ID"] = agent_id
+
+    target_env = env_path
+    if target_env is None:
+        explicit_env = str(os.getenv("DALE_ENV_PATH") or "").strip()
+        if explicit_env:
+            target_env = Path(explicit_env)
+        else:
+            config_dir = str(os.getenv("DALE_CONFIG_DIR") or "").strip()
+            if config_dir:
+                target_env = Path(config_dir) / ".env"
+    if target_env is None:
+        return True
+
+    target_env.parent.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    if target_env.exists():
+        try:
+            lines = target_env.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            lines = []
+
+    updates = {
+        "CLOUD_BASE_URL": cloud_base_url,
+        "STORE_ID": store_id,
+        "EDGE_TOKEN": edge_token,
+    }
+    if agent_id:
+        updates["AGENT_ID"] = agent_id
+
+    index_by_key: dict[str, int] = {}
+    for i, line in enumerate(lines):
+        match = _ENV_LINE_RE.match(line.strip())
+        if match:
+            index_by_key[match.group(1)] = i
+
+    for key, value in updates.items():
+        serialized = f"{key}={value}"
+        if key in index_by_key:
+            lines[index_by_key[key]] = serialized
+        else:
+            lines.append(serialized)
+
+    text = "\n".join(lines).rstrip() + "\n"
+    target_env.write_text(text, encoding="utf-8")
+    logger.info(
+        "[ACTIVATION] env hydrated path=%s store_id=%s edge_token_len=%s",
+        target_env,
+        store_id,
+        len(edge_token),
+    )
+    return True
+
+
 def _generate_device_key() -> str:
     return f"edge-{uuid.uuid4()}"
 
@@ -229,6 +313,7 @@ def bootstrap_activation(
         manager.update_partial(
             device_key=str(payload.get("device_key") or device_key),
             store_id=str(payload.get("store_id") or data.get("store_id") or ""),
+            edge_token=str(payload.get("edge_token") or data.get("edge_token") or ""),
             edge_device_id=str(payload.get("device_id") or ""),
             update_channel=str(payload.get("update_channel") or update_channel),
             installed_version=str(payload.get("installed_version") or installed_version),

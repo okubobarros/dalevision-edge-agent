@@ -32,7 +32,12 @@ from .cameras import (
     send_camera_health_event,
     send_vision_metrics_event,
 )
-from .activation import AgentState, ConfigManager, bootstrap_activation
+from .activation import (
+    AgentState,
+    ConfigManager,
+    bootstrap_activation,
+    hydrate_runtime_env_from_activation_config,
+)
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
@@ -1265,6 +1270,11 @@ def main() -> int:
     elif activation_outcome.state == AgentState.ERROR:
         logger.error("[ACTIVATION] bootstrap entered error state; aborting startup.")
         return EXIT_CONFIG_ERROR
+    hydrate_runtime_env_from_activation_config(
+        logger=logger,
+        config=activation_outcome.config if isinstance(activation_outcome.config, dict) else {},
+        env_path=env_path,
+    )
 
     try:
         settings = load_settings()

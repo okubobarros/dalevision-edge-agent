@@ -9,6 +9,7 @@ from dalevision_edge_agent.activation import (
     AgentState,
     ConfigManager,
     bootstrap_activation,
+    hydrate_runtime_env_from_activation_config,
 )
 
 
@@ -25,6 +26,7 @@ class _ClientOk:
                 "device_key": "edge-device-123",
                 "installed_version": "1.0.0",
                 "update_channel": "stable",
+                "edge_token": "edge-token-generated",
             },
             network_error=False,
         )
@@ -81,6 +83,7 @@ def test_bootstrap_activation_success_persists_identity(tmp_path: Path) -> None:
     assert data.get("edge_device_id") == "dev-123"
     assert data.get("store_id") == "123e4567-e89b-12d3-a456-426614174000"
     assert data.get("device_key") == "edge-device-123"
+    assert data.get("edge_token") == "edge-token-generated"
     assert "activation_token" not in data
 
 
@@ -127,3 +130,25 @@ def test_bootstrap_with_existing_device_stays_active_without_activation_call(tmp
     )
     assert out.state == AgentState.ACTIVE
     assert out.result is None
+
+
+def test_hydrate_runtime_env_from_activation_config_updates_env_file(tmp_path: Path) -> None:
+    env_path = tmp_path / ".env"
+    env_path.write_text("VISION_ENABLED=1\n", encoding="utf-8")
+    ok = hydrate_runtime_env_from_activation_config(
+        logger=_logger(),
+        config={
+            "cloud_base_url": "https://api.example.com",
+            "store_id": "123e4567-e89b-12d3-a456-426614174000",
+            "edge_token": "edge-token-abc",
+            "agent_id": "edge-001",
+        },
+        env_path=env_path,
+    )
+    assert ok is True
+    content = env_path.read_text(encoding="utf-8")
+    assert "CLOUD_BASE_URL=https://api.example.com" in content
+    assert "STORE_ID=123e4567-e89b-12d3-a456-426614174000" in content
+    assert "EDGE_TOKEN=edge-token-abc" in content
+    assert "AGENT_ID=edge-001" in content
+    assert "VISION_ENABLED=1" in content
