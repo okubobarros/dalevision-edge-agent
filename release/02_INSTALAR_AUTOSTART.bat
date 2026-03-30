@@ -12,14 +12,16 @@ echo Aguarde... preparando instalacao.
 echo.
 
 if not exist "%ROOT%\logs" mkdir "%ROOT%\logs" >nul 2>&1
-set "LOG=%ROOT%\logs\service_install.log"
+set "LOCAL_DV=%LOCALAPPDATA%\DaleVision"
+set "LOG=%LOCAL_DV%\logs\service_install.log"
+if not exist "%LOCAL_DV%\logs" mkdir "%LOCAL_DV%\logs" >nul 2>&1
 echo ==== %date% %time% ====>> "%LOG%"
 echo ROOT=%ROOT%>> "%LOG%"
 echo BAT_PATH=%~f0>> "%LOG%"
 echo BAT_SHA256=>> "%LOG%"
 echo Calculando hash do instalador...
 certutil -hashfile "%~f0" SHA256 >> "%LOG%" 2>&1
-set "PS1=%ROOT%\scripts\install-service.ps1"
+set "PS1=%ROOT%\scripts\install-user.ps1"
 echo PS1_PATH=%PS1%>> "%LOG%"
 if exist "%PS1%" (
   echo PS1_EXISTS=true>> "%LOG%"
@@ -31,12 +33,12 @@ if exist "%PS1%" (
 )
 
 set "PS=C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-echo Installing autostart for current user (ONLOGON).>> "%LOG%"
+echo Installing per-user startup shortcut (no admin).>> "%LOG%"
 echo PS=%PS%>> "%LOG%"
 echo PS1=%PS1%>> "%LOG%"
 echo Iniciando instalacao do autostart...
 
-"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -InstallDir "%ROOT%" >> "%LOG%" 2>&1
+"%PS%" -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -SourceRoot "%ROOT%" >> "%LOG%" 2>&1
 set "EC=%errorlevel%"
 echo EXIT_CODE=%EC%>> "%LOG%"
 echo.>> "%LOG%"

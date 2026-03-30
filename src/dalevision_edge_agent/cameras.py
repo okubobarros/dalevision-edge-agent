@@ -286,7 +286,14 @@ def fetch_cameras(
 
 
 def _cache_root(cache_dir: Optional[Path]) -> Path:
-    base = cache_dir or (Path.cwd() / "cache" / "roi")
+    if cache_dir is not None:
+        base = cache_dir
+    else:
+        cache_root_env = str(os.getenv("DALE_CACHE_DIR") or "").strip()
+        if cache_root_env:
+            base = Path(cache_root_env) / "roi"
+        else:
+            base = Path.cwd() / "cache" / "roi"
     base.mkdir(parents=True, exist_ok=True)
     return base
 
@@ -739,7 +746,10 @@ def capture_snapshot_if_possible(
             return {"snapshot_status": "error", "snapshot_local_path": None}
         return {"snapshot_status": "ok", "snapshot_local_path": result}
 
-    snapshots_dir = Path.cwd() / "cache" / "snapshots"
+    cache_root_env = str(os.getenv("DALE_CACHE_DIR") or "").strip()
+    snapshots_dir = (
+        Path(cache_root_env) / "snapshots" if cache_root_env else Path.cwd() / "cache" / "snapshots"
+    )
     output_dir = snapshots_dir / camera_id
     output_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{int(time.time())}.jpg"
@@ -773,7 +783,10 @@ def _capture_snapshot_ffmpeg(
     timeout_seconds: int,
     ffmpeg_path: str,
 ) -> Optional[str]:
-    snapshots_dir = Path.cwd() / "cache" / "snapshots"
+    cache_root_env = str(os.getenv("DALE_CACHE_DIR") or "").strip()
+    snapshots_dir = (
+        Path(cache_root_env) / "snapshots" if cache_root_env else Path.cwd() / "cache" / "snapshots"
+    )
     output_dir = snapshots_dir / camera_id
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{int(time.time())}.jpg"

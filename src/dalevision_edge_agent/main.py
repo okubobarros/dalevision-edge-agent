@@ -44,6 +44,7 @@ from .onboarding_readiness import (
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import build_onboarding_blueprint, run_discovery, run_scan
 from .setup_api import serve_setup_api
+from .paths import cleanup_old_runtime_tmp, resolve_runtime_paths
 from .update import (
     apply_update_if_possible,
     acquire_update_lock,
@@ -386,9 +387,9 @@ def _setup_logging() -> logging.Logger:
     if log_root:
         log_dir = Path(log_root)
     else:
-        program_data = os.getenv("PROGRAMDATA")
-        if program_data:
-            log_dir = Path(program_data) / "DaleVision" / "logs"
+        local_appdata = os.getenv("LOCALAPPDATA")
+        if local_appdata:
+            log_dir = Path(local_appdata) / "DaleVision" / "logs"
         else:
             log_dir = Path.cwd() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -1039,9 +1040,33 @@ def _floor_bucket(ts: float, bucket_seconds: int) -> tuple[str, str]:
 
 def main() -> int:
     args = _parse_args()
+    runtime_paths = resolve_runtime_paths(version=_get_version())
+    os.environ.setdefault("DALE_APP_DIR", str(runtime_paths.app_dir))
+    os.environ.setdefault("DALE_CONFIG_DIR", str(runtime_paths.config_dir))
+    os.environ.setdefault("DALE_LOG_DIR", str(runtime_paths.log_dir))
+    os.environ.setdefault("DALE_CACHE_DIR", str(runtime_paths.cache_dir))
+    os.environ.setdefault("DALE_ENV_PATH", str(runtime_paths.config_dir / ".env"))
+    os.environ.setdefault(
+        "DALE_AGENT_CONFIG_PATH",
+        str(runtime_paths.config_dir / "agent_config.json"),
+    )
+    os.environ["TEMP"] = str(runtime_paths.runtime_tmp_dir)
+    os.environ["TMP"] = str(runtime_paths.runtime_tmp_dir)
+
     env_path = load_env_from_cwd()
     logger = _setup_logging()
+    cleanup_errors = cleanup_old_runtime_tmp(runtime_tmp_root=runtime_paths.runtime_tmp_root)
+    for cleanup_error in cleanup_errors:
+        logger.warning("[RUNTIME] cleanup_skip path_lock=%s", cleanup_error)
     env_meta = describe_env_file(env_path)
+    logger.info(
+        "[RUNTIME] app_dir=%s config_dir=%s log_dir=%s cache_dir=%s runtime_tmp=%s",
+        runtime_paths.app_dir,
+        runtime_paths.config_dir,
+        runtime_paths.log_dir,
+        runtime_paths.cache_dir,
+        runtime_paths.runtime_tmp_dir,
+    )
     logger.info(
         "ENV file path=%s cwd=%s exists=%s mtime_utc=%s size_bytes=%s sha256=%s",
         env_meta.get("path"),

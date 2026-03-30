@@ -87,7 +87,9 @@ $requiredSources = @(
   @{ Path = (Join-Path $releaseRoot "run_agent.cmd"); Label = "run_agent.cmd" },
   @{ Path = (Join-Path $releaseRoot "run_agent.vbs"); Label = "run_agent.vbs" },
   @{ Path = (Join-Path $repoRoot "scripts\install-service.ps1"); Label = "install-service.ps1" },
+  @{ Path = (Join-Path $repoRoot "scripts\install-user.ps1"); Label = "install-user.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\uninstall-service.ps1"); Label = "uninstall-service.ps1" },
+  @{ Path = (Join-Path $repoRoot "scripts\uninstall-user.ps1"); Label = "uninstall-user.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\verify-service.ps1"); Label = "verify-service.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\stop-agent.ps1"); Label = "stop-agent.ps1" },
   @{ Path = (Join-Path $repoRoot "scripts\update.ps1"); Label = "update.ps1" },
@@ -124,7 +126,9 @@ $scriptsDir = Join-Path $releaseWin "scripts"
 $internalDir = Join-Path $scriptsDir "internal"
 New-Item -ItemType Directory -Path $internalDir -Force | Out-Null
 Copy-Item (Join-Path $repoRoot "scripts\install-service.ps1") (Join-Path $scriptsDir "install-service.ps1") -Force
+Copy-Item (Join-Path $repoRoot "scripts\install-user.ps1") (Join-Path $scriptsDir "install-user.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\uninstall-service.ps1") (Join-Path $scriptsDir "uninstall-service.ps1") -Force
+Copy-Item (Join-Path $repoRoot "scripts\uninstall-user.ps1") (Join-Path $scriptsDir "uninstall-user.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\install-service.ps1") (Join-Path $scriptsDir "install_service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\uninstall-service.ps1") (Join-Path $scriptsDir "uninstall_service.ps1") -Force
 Copy-Item (Join-Path $repoRoot "scripts\verify-service.ps1") (Join-Path $scriptsDir "verify-service.ps1") -Force
@@ -190,7 +194,9 @@ $required = @(
   "BUILD_INFO.txt",
   "README.txt",
   "scripts/install-service.ps1",
+  "scripts/install-user.ps1",
   "scripts/uninstall-service.ps1",
+  "scripts/uninstall-user.ps1",
   "scripts/install_service.ps1",
   "scripts/uninstall_service.ps1",
   "scripts/verify-service.ps1",

@@ -433,7 +433,7 @@ def _log_dir() -> Path:
     log_root = os.getenv("DALE_LOG_DIR")
     if log_root:
         return Path(log_root)
-    program_data = os.getenv("PROGRAMDATA")
-    if program_data:
-        return Path(program_data) / "DaleVision" / "logs"
+    local = os.getenv("LOCALAPPDATA")
+    if local:
+        return Path(local) / "DaleVision" / "logs"
     return Path.cwd() / "logs"

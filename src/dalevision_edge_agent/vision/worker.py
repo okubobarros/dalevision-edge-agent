@@ -346,6 +346,9 @@ class VisionWorker:
             if not path.is_absolute():
                 path = Path.cwd() / path
             return path
+        cache_root_env = _env_str("DALE_CACHE_DIR", "").strip()
+        if cache_root_env:
+            return Path(cache_root_env) / "vision_outbox.sqlite"
         return Path.cwd() / "cache" / "vision_outbox.sqlite"
 
     def _outbox_backoff_seconds(self, attempts: int) -> int:
@@ -453,6 +456,9 @@ class VisionWorker:
         raw = _env_str("VISION_CAMERAS_CACHE_PATH", "").strip()
         if raw:
             return Path(raw)
+        cache_root_env = _env_str("DALE_CACHE_DIR", "").strip()
+        if cache_root_env:
+            return Path(cache_root_env) / "cameras_cache.json"
         return Path.cwd() / "cache" / "cameras_cache.json"
 
     def _parse_cameras_json(self, raw: str, *, source: str) -> tuple[list[dict], Optional[str]]:
@@ -474,7 +480,7 @@ class VisionWorker:
         return cameras, None
 
     def _load_cameras_json_from_env_file(self) -> str:
-        env_path = Path.cwd() / ".env"
+        env_path = Path(_env_str("DALE_ENV_PATH", "").strip() or (Path.cwd() / ".env"))
         if not env_path.exists():
             return ""
         try:
@@ -1384,8 +1390,12 @@ class VisionWorker:
 
     def _programdata_roi_path(self, camera_id: str) -> Path:
         import os
-        program_data = os.getenv("PROGRAMDATA") or "C:\\ProgramData"
-        base = Path(program_data) / "DaleVision" / "rois" / self.store_id
+        local_app = os.getenv("LOCALAPPDATA") or ""
+        if local_app:
+            base = Path(local_app) / "DaleVision" / "cache" / "rois" / self.store_id
+        else:
+            program_data = os.getenv("PROGRAMDATA") or "C:\\ProgramData"
+            base = Path(program_data) / "DaleVision" / "rois" / self.store_id
         base.mkdir(parents=True, exist_ok=True)
         return base / f"{camera_id}.yaml"
 

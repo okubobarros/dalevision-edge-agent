@@ -7,7 +7,9 @@ a = Analysis(
     binaries=[],
     datas=[
         ('scripts\\install-service.ps1', 'scripts'),
+        ('scripts\\install-user.ps1', 'scripts'),
         ('scripts\\uninstall-service.ps1', 'scripts'),
+        ('scripts\\uninstall-user.ps1', 'scripts'),
         ('scripts\\verify-service.ps1', 'scripts'),
         ('scripts\\update.ps1', 'scripts'),
         ('scripts\\internal\\Start_DaleVision_Agent.ps1', 'scripts\\internal'),

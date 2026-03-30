@@ -12,6 +12,7 @@ import socket
 import uuid
 
 from dotenv import dotenv_values
+from .paths import resolve_runtime_paths
 
 REQUIRED_ENV = {
     "CLOUD_BASE_URL": ["DALE_CLOUD_BASE_URL"],
@@ -100,16 +101,32 @@ def describe_env_file(env_path: Path) -> dict:
 
 
 def load_env_from_cwd() -> Path:
-    env_path = Path.cwd() / ".env"
-    if env_path.exists():
-        text = _read_env_text(env_path)
+    runtime_paths = resolve_runtime_paths()
+    explicit_env = os.getenv("DALE_ENV_PATH")
+    candidates = []
+    if explicit_env:
+        candidates.append(Path(explicit_env))
+    candidates.extend(
+        [
+            runtime_paths.config_dir / ".env",
+            Path.cwd() / ".env",
+        ]
+    )
+
+    selected = candidates[0]
+    for env_path in candidates:
+        if env_path.exists():
+            selected = env_path
+            break
+    if selected.exists():
+        text = _read_env_text(selected)
         values = dotenv_values(stream=io.StringIO(text))
         for key, value in values.items():
             if value is None:
                 continue
             if key not in os.environ:
                 os.environ[key] = value
-    return env_path
+    return selected
 
 
 def _get_env_value(name: str, legacy_names: list[str], *, strip: bool = True) -> str:

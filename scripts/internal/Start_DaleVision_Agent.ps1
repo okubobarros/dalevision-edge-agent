@@ -1,5 +1,8 @@
 param(
-  [string]$InstallDir = $PSScriptRoot
+  [string]$InstallDir = $PSScriptRoot,
+  [string]$ConfigDir = "",
+  [string]$LogDir = "",
+  [string]$CacheDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -9,11 +12,36 @@ if ($null -eq $installDirSafe) { $installDirSafe = "" }
 $installDirSafe = $installDirSafe.Trim().Trim('"').TrimEnd("\", "/").Trim()
 $installRoot = (Resolve-Path $installDirSafe).Path
 $exePath = Join-Path $installRoot "dalevision-edge-agent.exe"
-$logDir = Join-Path $installRoot "logs"
+$configDirSafe = $ConfigDir
+if ([string]::IsNullOrWhiteSpace($configDirSafe)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+    $configDirSafe = Join-Path $env:APPDATA "DaleVision"
+  } else {
+    $configDirSafe = Join-Path $installRoot "config"
+  }
+}
+$logDirSafe = $LogDir
+if ([string]::IsNullOrWhiteSpace($logDirSafe)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    $logDirSafe = Join-Path $env:LOCALAPPDATA "DaleVision\logs"
+  } else {
+    $logDirSafe = Join-Path $installRoot "logs"
+  }
+}
+$cacheDirSafe = $CacheDir
+if ([string]::IsNullOrWhiteSpace($cacheDirSafe)) {
+  if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+    $cacheDirSafe = Join-Path $env:LOCALAPPDATA "DaleVision\cache"
+  } else {
+    $cacheDirSafe = Join-Path $installRoot "cache"
+  }
+}
 $launcherMutexName = "Global\DaleVisionEdgeAgentLauncher"
 
-if (-not (Test-Path $logDir)) {
-  New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+foreach ($dir in @($configDirSafe, $logDirSafe, $cacheDirSafe)) {
+  if (-not (Test-Path $dir)) {
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+  }
 }
 
 if (-not (Test-Path $exePath)) {
@@ -36,17 +64,54 @@ foreach ($name in @("PYTHONHOME", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONEXECUTAB
   Remove-Item -Path "Env:$name" -ErrorAction SilentlyContinue
 }
 
-$tmpDir = Join-Path $installRoot "cache\tmp"
+$version = "unknown"
+try {
+  $fvi = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exePath)
+  if ($fvi -and -not [string]::IsNullOrWhiteSpace($fvi.FileVersion)) {
+    $version = $fvi.FileVersion.Trim()
+  }
+} catch {
+  $version = "unknown"
+}
+$versionSafe = ($version -replace '[^A-Za-z0-9._-]', '-')
+if ([string]::IsNullOrWhiteSpace($versionSafe)) { $versionSafe = "unknown" }
+$runtimeRoot = Join-Path $cacheDirSafe "runtime\$versionSafe"
+$tmpDir = Join-Path $runtimeRoot ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString())
 if (-not (Test-Path $tmpDir)) {
   New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
 }
+
+try {
+  if (Test-Path $runtimeRoot) {
+    $dirs = Get-ChildItem -Path $runtimeRoot -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $keep = 0
+    foreach ($dir in $dirs) {
+      $keep += 1
+      if ($keep -le 3) { continue }
+      $ageSeconds = ([DateTime]::UtcNow - $dir.LastWriteTimeUtc).TotalSeconds
+      if ($ageSeconds -lt (7 * 24 * 3600)) { continue }
+      try { Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction Stop } catch { Write-Host ("RUNTIME_TMP_CLEANUP_SKIP=" + $dir.FullName + " reason=" + $_.Exception.Message) }
+    }
+  }
+} catch {
+  Write-Host ("RUNTIME_TMP_CLEANUP_ERROR=" + $_.Exception.Message)
+}
 $env:TEMP = $tmpDir
 $env:TMP = $tmpDir
+$env:DALE_APP_DIR = $installRoot
+$env:DALE_CONFIG_DIR = $configDirSafe
+$env:DALE_LOG_DIR = $logDirSafe
+$env:DALE_CACHE_DIR = $cacheDirSafe
+$env:DALE_ENV_PATH = (Join-Path $configDirSafe ".env")
+$env:DALE_AGENT_CONFIG_PATH = (Join-Path $configDirSafe "agent_config.json")
 
 Write-Host ("RUN_MODE=" + $env:DALE_RUN_MODE)
 Write-Host ("TEMP=" + $env:TEMP)
 Write-Host ("TMP=" + $env:TMP)
 Write-Host ("USER=" + $env:USERNAME)
+Write-Host ("CONFIG_DIR=" + $env:DALE_CONFIG_DIR)
+Write-Host ("LOG_DIR=" + $env:DALE_LOG_DIR)
+Write-Host ("CACHE_DIR=" + $env:DALE_CACHE_DIR)
 
 Set-Location -Path $installRoot
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 import uuid
@@ -29,6 +30,12 @@ class ConfigManager:
 
     @classmethod
     def from_default(cls) -> "ConfigManager":
+        explicit = str(os.getenv("DALE_AGENT_CONFIG_PATH") or "").strip()
+        if explicit:
+            return cls(Path(explicit))
+        config_dir = str(os.getenv("DALE_CONFIG_DIR") or "").strip()
+        if config_dir:
+            return cls(Path(config_dir) / DEFAULT_CONFIG_FILENAME)
         return cls(Path.cwd() / DEFAULT_CONFIG_FILENAME)
 
     def load(self) -> dict[str, Any]:
