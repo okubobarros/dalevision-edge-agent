@@ -126,6 +126,33 @@ function Upsert-EnvValue {
   $lines | Set-Content -Path $EnvPath -Encoding UTF8
 }
 
+function Resolve-AppDashboardUrl {
+  param(
+    [string]$CloudBaseUrl,
+    [string]$StoreId
+  )
+  $defaultBase = "https://app.dalevision.com"
+  if ([string]::IsNullOrWhiteSpace($CloudBaseUrl)) {
+    if (-not [string]::IsNullOrWhiteSpace($StoreId)) {
+      return ("{0}/app/dashboard?store={1}&openEdgeSetup=1" -f $defaultBase.TrimEnd("/"), $StoreId)
+    }
+    return ("{0}/app/dashboard?openEdgeSetup=1" -f $defaultBase.TrimEnd("/"))
+  }
+  $base = $CloudBaseUrl.Trim()
+  if ($base -match "^https?://api\.") {
+    $base = $base -replace "^https?://api\.", "https://app."
+  }
+  $base = $base -replace "/api/?$", ""
+  if ($base -notmatch "^https?://") {
+    $base = $defaultBase
+  }
+  $base = $base.TrimEnd("/")
+  if (-not [string]::IsNullOrWhiteSpace($StoreId)) {
+    return ("{0}/app/dashboard?store={1}&openEdgeSetup=1" -f $base, $StoreId)
+  }
+  return ("{0}/app/dashboard?openEdgeSetup=1" -f $base)
+}
+
 $local = $env:LOCALAPPDATA
 $roam = $env:APPDATA
 if ([string]::IsNullOrWhiteSpace($local) -or [string]::IsNullOrWhiteSpace($roam)) {
@@ -316,4 +343,15 @@ Write-Log "INSTALL006 install_info_written"
 
 Start-Process -FilePath $runCmd -WorkingDirectory $targetRoot -WindowStyle Hidden
 Write-Log "INSTALL007 run_started"
+try {
+  $storeForRedirect = ""
+  if ($agentConfig.ContainsKey("store_id")) {
+    $storeForRedirect = [string]$agentConfig["store_id"]
+  }
+  $appUrl = Resolve-AppDashboardUrl -CloudBaseUrl $CloudBaseUrl -StoreId $storeForRedirect
+  Start-Process -FilePath $appUrl | Out-Null
+  Write-Log ("INSTALL008 app_opened url={0}" -f $appUrl)
+} catch {
+  Write-Log ("INSTALL008E app_open_failed err={0}" -f $_.Exception.Message)
+}
 Write-Log "INSTALL999 ok"
