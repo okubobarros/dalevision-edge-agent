@@ -93,10 +93,30 @@ def run_scan(*, logger: logging.Logger) -> list[dict[str, Any]]:
     ipconfig_text = _run_cmd("ipconfig /all")
     parsed = _parse_ipconfig(ipconfig_text)
     ipv4 = parsed.get("ipv4")
-    if not ipv4:
+    results = []
+
+    # 1. WS-Discovery Automático (Frictionless ONVIF)
+    try:
+        from .discovery import discover_onvif_cameras
+        logger.info("Executando ONVIF Auto-Discovery...")
+        onvif_results = discover_onvif_cameras(timeout=2)
+        if onvif_results:
+            results.extend(onvif_results)
+    except Exception as exc:
+        logger.warning(f"ONVIF Auto-Discovery skipado/falhou: {exc}")
+
+    # 2. Fallback Scan Direto
+    if ipv4:
+        fallback_results = _scan_range(ipv4, logger)
+        if fallback_results:
+            # Elimina duplicados baseados no IP inserido pelo ONVIF
+            found_ips = {r["ip"] for r in results}
+            for fr in fallback_results:
+                if fr["ip"] not in found_ips:
+                    results.append(fr)
+    else:
         logger.warning("NET001 sem IP local detectado")
-        return []
-    results = _scan_range(ipv4, logger)
+
     if not results:
         logger.info("NETSCAN nenhum candidato encontrado")
     return results
