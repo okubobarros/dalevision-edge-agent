@@ -3,7 +3,8 @@ param(
   [string]$Version = "",
   [string]$ActivationToken = "",
   [string]$ActivationTokenFile = "",
-  [string]$CloudBaseUrl = ""
+  [string]$CloudBaseUrl = "",
+  [string]$OpenDashboard = "0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -151,6 +152,20 @@ function Resolve-AppDashboardUrl {
     return ("{0}/app/dashboard?store={1}&openEdgeSetup=1" -f $base, $StoreId)
   }
   return ("{0}/app/dashboard?openEdgeSetup=1" -f $base)
+}
+
+function Parse-BoolString {
+  param([string]$RawValue)
+  if ([string]::IsNullOrWhiteSpace($RawValue)) {
+    return $false
+  }
+  switch ($RawValue.Trim().ToLowerInvariant()) {
+    "1" { return $true }
+    "true" { return $true }
+    "yes" { return $true }
+    "on" { return $true }
+    default { return $false }
+  }
 }
 
 $local = $env:LOCALAPPDATA
@@ -343,15 +358,20 @@ Write-Log "INSTALL006 install_info_written"
 
 Start-Process -FilePath $runCmd -WorkingDirectory $targetRoot -WindowStyle Hidden
 Write-Log "INSTALL007 run_started"
-try {
-  $storeForRedirect = ""
-  if ($agentConfig.ContainsKey("store_id")) {
-    $storeForRedirect = [string]$agentConfig["store_id"]
+$shouldOpenDashboard = Parse-BoolString -RawValue $OpenDashboard
+if ($shouldOpenDashboard) {
+  try {
+    $storeForRedirect = ""
+    if ($agentConfig.ContainsKey("store_id")) {
+      $storeForRedirect = [string]$agentConfig["store_id"]
+    }
+    $appUrl = Resolve-AppDashboardUrl -CloudBaseUrl $CloudBaseUrl -StoreId $storeForRedirect
+    Start-Process -FilePath $appUrl | Out-Null
+    Write-Log ("INSTALL008 app_opened url={0}" -f $appUrl)
+  } catch {
+    Write-Log ("INSTALL008E app_open_failed err={0}" -f $_.Exception.Message)
   }
-  $appUrl = Resolve-AppDashboardUrl -CloudBaseUrl $CloudBaseUrl -StoreId $storeForRedirect
-  Start-Process -FilePath $appUrl | Out-Null
-  Write-Log ("INSTALL008 app_opened url={0}" -f $appUrl)
-} catch {
-  Write-Log ("INSTALL008E app_open_failed err={0}" -f $_.Exception.Message)
+} else {
+  Write-Log "INSTALL008S app_open_skipped"
 }
 Write-Log "INSTALL999 ok"

@@ -21,14 +21,24 @@ def compute_idempotency_key(
     data: dict[str, Any] | None,
     ts: str | None,
     bucket_seconds: int = 5,
+    bucket_minutes: int | None = None,
 ) -> str:
     payload = data or {}
     dt = _parse_iso_ts(ts)
-    
-    # 5-second bucketing
-    seconds = dt.second + (dt.microsecond / 1_000_000.0)
-    bucketed_second = int(seconds // bucket_seconds) * bucket_seconds
-    ts_bucket = dt.replace(second=bucketed_second, microsecond=0).isoformat()
+
+    # Backward compatibility: older callers pass bucket_minutes.
+    # If provided, it takes precedence and aligns bucket to minute windows.
+    if bucket_minutes is not None:
+        minutes = max(1, int(bucket_minutes))
+        bucket_start_minute = (dt.minute // minutes) * minutes
+        dt = dt.replace(minute=bucket_start_minute, second=0, microsecond=0)
+        ts_bucket = dt.isoformat()
+    else:
+        # Default 5-second bucketing.
+        seconds = dt.second + (dt.microsecond / 1_000_000.0)
+        safe_bucket_seconds = max(1, int(bucket_seconds))
+        bucketed_second = int(seconds // safe_bucket_seconds) * safe_bucket_seconds
+        ts_bucket = dt.replace(second=bucketed_second, microsecond=0).isoformat()
     
     base = {
         "event_name": event_name,
