@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import os
+import time
 import json
 import logging
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
@@ -9,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 from .installation_check import build_installation_check_payload
 from .onboarding_readiness import build_onboarding_readiness
 from .scan import build_onboarding_blueprint
+from .streaming import stream_manager
 
 
 DiscoveryProvider = Callable[[], list[dict[str, Any]]]
@@ -23,15 +27,30 @@ def build_setup_api_response(
     route = parsed.path.rstrip("/") or "/"
     query = parse_qs(parsed.query)
 
+    def get_local_ips() -> list[str]:
+        ips = []
+        try:
+            hostname = socket.gethostname()
+            info = socket.getaddrinfo(hostname, None)
+            for addr in info:
+                ip = addr[4][0]
+                if ":" not in ip and ip != "127.0.0.1": # IPv4 only, skip localhost
+                    ips.append(ip)
+        except:
+            pass
+        return list(set(ips))
+
     if route == "/health":
         return 200, {
             "ok": True,
             "service": "edge_setup_api",
             "status": "online",
+            "ips": get_local_ips(),
             "capabilities": {
                 "onboarding_blueprint": True,
                 "onboarding_readiness": True,
                 "onboarding_installation_check": True,
+                "streaming_hls": True,
             },
         }
 
@@ -62,6 +81,18 @@ def build_setup_api_response(
     if route == "/onboarding/installation-check":
         payload = build_installation_check_payload()
         return 200, payload
+
+    # --- Streaming (Phase 1) ---
+    if route.startswith("/stream/"):
+        # Serve static stream files from a temp folder or the worker's shared state
+        content_type = "image/jpeg"
+        if route.endswith(".m3u8"):
+            content_type = "application/vnd.apple.mpegurl"
+        elif route.endswith(".ts"):
+            content_type = "video/MP2T"
+        
+        # This will be handled by the Handler if we allow file access
+        return 200, {"ok": True, "serving_file": True}
 
     return 404, {
         "ok": False,
@@ -99,6 +130,46 @@ def serve_setup_api(
             self.end_headers()
 
         def do_GET(self):  # noqa: N802
+            parsed = urlparse(self.path)
+            route = parsed.path.rstrip("/") or "/"
+            
+            # Simple static file server for HLS segments in a 'tmp_streams' dir
+            if "/stream/" in route:
+                filename = os.path.basename(route)
+                cam_id = filename.split(".")[0]
+                
+                # If requesting the playlist, ensure ffmpeg is running
+                if filename.endswith(".m3u8"):
+                    cameras = discovery_provider()
+                    target_cam = next((c for c in cameras if (c.get("camera_id") or c.get("id")) == cam_id), None)
+                    if target_cam and target_cam.get("rtsp_url"):
+                        stream_manager.start_hls(cam_id, target_cam["rtsp_url"])
+                
+                stream_dir = os.path.join(os.getcwd(), "tmp_streams")
+                file_path = os.path.join(stream_dir, filename)
+                
+                # Wait a bit for the first segment if needed
+                max_retries = 5
+                while not os.path.exists(file_path) and max_retries > 0:
+                    time.sleep(1)
+                    max_retries -= 1
+
+                if os.path.exists(file_path):
+                    content_type = "application/octet-stream"
+                    if filename.endswith(".m3u8"): content_type = "application/vnd.apple.mpegurl"
+                    elif filename.endswith(".ts"): content_type = "video/MP2T"
+                    elif filename.endswith(".jpg"): content_type = "image/jpeg"
+                    
+                    with open(file_path, "rb") as f:
+                        data = f.read()
+                        self.send_response(200)
+                        self.send_header("Content-Type", content_type)
+                        self.send_header("Content-Length", str(len(data)))
+                        self._set_cors_headers()
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
+
             code, payload = build_setup_api_response(
                 path=self.path,
                 discovery_provider=discovery_provider,

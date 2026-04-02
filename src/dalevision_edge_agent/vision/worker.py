@@ -171,6 +171,7 @@ class VisionWorker:
         self._stop = threading.Event()
 
         self._camera_states: Dict[str, dict] = {}
+        self._last_cameras_list: List[dict] = []
         self.motion_gate_enabled = self._parse_bool_env("VISION_MOTION_GATE_ENABLED", False)
         self._motion_gates: Dict[str, AdaptiveMotionGate] = {}
         self._roi_override: Optional[dict] = None
@@ -733,6 +734,7 @@ class VisionWorker:
                 cameras = self._apply_roi_to_cameras(edge_cameras)
                 self._save_cameras_cache(cameras, source=edge_source or "edge")
                 self.logger.info("[VISION] cameras source=%s loaded=%s", edge_source or "edge", len(cameras))
+                self._last_cameras_list = cameras
                 return cameras
             self.logger.warning("[VISION] cameras edge sync unavailable; trying fallback")
         elif camera_sync_enabled and not remote_sync_enabled and not local_only:
@@ -744,6 +746,7 @@ class VisionWorker:
             cameras = self._apply_roi_to_cameras(cameras_from_env)
             self._save_cameras_cache(cameras, source="CAMERAS_JSON")
             self.logger.info("[VISION] cameras source=CAMERAS_JSON loaded=%s", len(cameras))
+            self._last_cameras_list = cameras
             return cameras
 
         if local_only:
