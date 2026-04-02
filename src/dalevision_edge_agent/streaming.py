@@ -1,7 +1,7 @@
 import os
 import subprocess
 import logging
-import signal
+import time
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -10,11 +10,21 @@ class StreamManager:
     def __init__(self, streams_dir: str = "tmp_streams"):
         self.streams_dir = streams_dir
         self.processes: Dict[str, subprocess.Popen] = {}
+        self.last_access: Dict[str, float] = {}
         
         if not os.path.exists(self.streams_dir):
             os.makedirs(self.streams_dir)
 
+    def touch(self, camera_id: str):
+        """Notifica que o stream está sendo assistido."""
+        self.last_access[camera_id] = time.time()
+
     def start_hls(self, camera_id: str, rtsp_url: str):
+        self.touch(camera_id)
+        
+        # Aproveita para limpar outros streams inativos (Inactivity Threshold: 60s)
+        self._cleanup_inactive()
+
         if camera_id in self.processes:
             # Check if still running
             if self.processes[camera_id].poll() is None:
@@ -77,6 +87,17 @@ class StreamManager:
     def stop_all(self):
         ids = list(self.processes.keys())
         for cid in ids:
+            self.stop_hls(cid)
+
+    def _cleanup_inactive(self, threshold_seconds: int = 60):
+        """Mata FFmpegs que não são acessados há algum tempo."""
+        now = time.time()
+        stale_ids = [
+            cid for cid, last in self.last_access.items() 
+            if (now - last) > threshold_seconds and cid in self.processes
+        ]
+        for cid in stale_ids:
+            logger.info(f"Stream {cid} inactive for over {threshold_seconds}s. Stopping FFmpeg.")
             self.stop_hls(cid)
 
 stream_manager = StreamManager()

@@ -145,6 +145,9 @@ def serve_setup_api(
                     if target_cam and target_cam.get("rtsp_url"):
                         stream_manager.start_hls(cam_id, target_cam["rtsp_url"])
                 
+                # Keep active
+                stream_manager.touch(cam_id)
+                
                 stream_dir = os.path.join(os.getcwd(), "tmp_streams")
                 file_path = os.path.join(stream_dir, filename)
                 
