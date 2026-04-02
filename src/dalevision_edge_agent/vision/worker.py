@@ -21,6 +21,7 @@ from .outbox import VisionOutbox
 from .geometry import line_side, point_in_polygon
 from .roi_yaml import load_roi_yaml
 from .sources.video import VideoFrameSource
+from .logic.motion import AdaptiveMotionGate
 
 
 def _now_ts() -> float:
@@ -170,6 +171,8 @@ class VisionWorker:
         self._stop = threading.Event()
 
         self._camera_states: Dict[str, dict] = {}
+        self.motion_gate_enabled = self._parse_bool_env("VISION_MOTION_GATE_ENABLED", False)
+        self._motion_gates: Dict[str, AdaptiveMotionGate] = {}
         self._roi_override: Optional[dict] = None
         self._roi_cache: Dict[str, dict] = {}
         self._roi_path_by_camera: Dict[str, str] = {}
@@ -212,7 +215,9 @@ class VisionWorker:
                 self.logger.exception("[VISION] tick failed: %s", exc)
             time.sleep(self.cfg.poll_seconds)
 
+    # v1.1.0: support for Motion Gate
     def tick_once(self):
+
         cameras = self._fetch_cameras()
         if not cameras:
             return
@@ -808,7 +813,9 @@ class VisionWorker:
         except Exception:
             return None
 
+    # v1.1.0: robust rtsp fetch
     def _fetch_rtsp_frame(self, cam: dict):
+
         camera_id = str(cam.get("camera_id") or cam.get("id") or "")
         rtsp_url = cam.get("rtsp_url")
         if not rtsp_url:
