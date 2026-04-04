@@ -43,6 +43,8 @@ def send_heartbeat(
         "ts": _utc_timestamp(),
         "agent_id": agent_id,
         "version": version,
+        "edge_version": version,
+        "status": "online",
     }
     if extra_data:
         data.update(extra_data)

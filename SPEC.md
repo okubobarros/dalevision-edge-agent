@@ -1,7 +1,13 @@
 # Specs
 
-As especificacoes deste repositorio vivem em:
-- Submodule: `./specs`
-- SSOT: `SSOT.md`
+Status: legado / redirecionado
 
-Use as specs como referencia principal para implementacoes, revisoes e PRs.
+Este arquivo não é mais a fonte de verdade principal do repositório.
+
+Use:
+- specs/EDGE-SYSTEM-001-agent-runtime-reliability/spec.md
+- specs/templates/edge-system-spec-template.md
+
+Instrução:
+- não editar mais este arquivo
+- criar novas specs somente dentro de specs/

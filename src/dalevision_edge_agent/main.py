@@ -765,7 +765,7 @@ def _run_once(
     print(f"Heartbeat -> {url} status={status}")
 
     if ok and status == 201:
-        print("✅ Conectado. Volte ao site e clique em 'Adicionar câmera'.")
+        print("Conectado com sucesso. Volte ao app para continuar")
         logger.info("Heartbeat -> %s status=%s", url, status)
         return 0
 
@@ -1104,11 +1104,7 @@ def main() -> int:
                 print("")
                 continue
             if choice == "4":
-                try:
-                    url = os.getenv("DASHBOARD_URL") or "https://app.dalevision.com/app/cameras?onboarding=true"
-                    os.startfile(url)
-                except Exception:
-                    print("Nao foi possivel abrir o navegador.")
+                print("Abra o app/web manualmente; o agente nao abre navegador.")
                 return 0
             print("Opcao invalida.")
 
@@ -1293,6 +1289,8 @@ def main() -> int:
             _rollback_update_if_needed(args.updated_from, logger)
         return 1
 
+    print("DaleVision Agent iniciado")
+    print("Conectando...")
     print("Loaded env OK")
     logger.info(
         "Loaded env OK (env_path=%s)",
