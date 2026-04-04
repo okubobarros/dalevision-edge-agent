@@ -5,10 +5,11 @@
 - Em sucesso: "Conectado com sucesso. Volte ao app para continuar".
 - Em erro: mensagem clara + retry automático com backoff; log detalhado.
 - Não abrir navegador automaticamente; usuário volta ao app por conta própria.
+- Heartbeat envia `{store_id, edge_version, status:"online", timestamp}` para destravar onboarding.
 
 ## Estados
 - Starting → Connecting → Connected | Error (retrying).
-- Heartbeat envia `{store_id, edge_version, status:"online", timestamp}` para destravar onboarding.
+- Se autostart falhar, registrar erro no log de instalação.
 
 ## Mensagens
 - Start: "DaleVision Agent iniciado"
