@@ -45,6 +45,7 @@ def build_setup_api_response(
             "ok": True,
             "service": "edge_setup_api",
             "status": "online",
+            "version": "1.0.22",
             "ips": get_local_ips(),
             "capabilities": {
                 "onboarding_blueprint": True,
@@ -61,6 +62,14 @@ def build_setup_api_response(
         return 200, {
             "ok": True,
             **payload,
+        }
+
+    if route == "/onboarding/ping":
+        # Ultra-lightweight endpoint for frontend polling
+        return 200, {
+            "ok": True,
+            "status": "online",
+            "timestamp": time.time()
         }
 
     if route == "/onboarding/readiness":
@@ -81,6 +90,27 @@ def build_setup_api_response(
     if route == "/onboarding/installation-check":
         payload = build_installation_check_payload()
         return 200, payload
+
+    if route == "/onboarding/test-camera":
+        ip = (query.get("ip") or [""])[0]
+        user = (query.get("user") or ["admin"])[0]
+        password = (query.get("password") or ["admin"])[0]
+        channel = int((query.get("channel") or ["1"])[0])
+        
+        from .rtsp_test import test_rtsp
+        import logging
+        logger = logging.getLogger("setup_api")
+        
+        result = test_rtsp(
+            ip=ip,
+            user=user,
+            password=password,
+            channel=channel,
+            subtype=0,
+            timeout_seconds=5,
+            logger=logger
+        )
+        return 200, result
 
     # --- Streaming (Phase 1) ---
     if route.startswith("/stream/"):

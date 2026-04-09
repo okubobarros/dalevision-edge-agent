@@ -16,6 +16,8 @@ import requests
 from .events import compute_idempotency_key
 
 CAMERA_LIST_ENDPOINTS = (
+    "/api/edge/stores/{store_id}/cameras/",
+    "/api/edge/cameras/",
     "/api/v1/stores/{store_id}/cameras/",
 )
 ROI_ENDPOINTS = (
@@ -251,7 +253,7 @@ def fetch_cameras(
     for endpoint in CAMERA_LIST_ENDPOINTS:
         path = endpoint.format(store_id=store_id)
         url = f"{base_url}{path}"
-        params = {"store_id": store_id} if "edge/cameras" in endpoint else None
+        params = {"store_id": store_id} if endpoint == "/api/edge/cameras/" else None
         payload, status, error = _request_json_with_backoff(
             method="GET",
             url=url,
@@ -277,9 +279,16 @@ def fetch_cameras(
                 )
             continue
 
-        cameras = payload.get("results") or payload.get("data") or payload
-        if isinstance(cameras, list):
-            return cameras, None
+        if isinstance(payload, list):
+            return payload, None
+
+        if isinstance(payload, dict):
+            cameras = payload.get("results") or payload.get("data") or payload.get("items")
+            if isinstance(cameras, list):
+                return cameras, None
+            return [], None
+
+        logger.warning("Camera list payload unexpected type=%s url=%s", type(payload).__name__, url)
         return [], None
 
     return [], "Camera list endpoint unavailable"

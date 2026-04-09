@@ -5,15 +5,14 @@ from typing import Any, List
 
 logger = logging.getLogger(__name__)
 
-def discover_onvif_cameras(timeout: int = 3) -> List[dict[str, Any]]:
+def discover_onvif_cameras(timeout: int = 2) -> List[dict[str, Any]]:
     """
     Realiza o broadcast UDP (WS-Discovery) na rede local para descobrir câmeras ONVIF.
-    Retorna a lista de IPs e portas compatíveis encontrados sem precisar de bibliotecas pesadas.
+    Retorna a lista de dispositivos encontrados com sugestões de paths RTSP.
     """
     WS_DISCOVERY_IP = '239.255.255.250'
     WS_DISCOVERY_PORT = 3702
     
-    # Payload WS-Discovery Padrão
     msg_id = uuid.uuid4().urn
     payload = f"""<?xml version="1.0" encoding="utf-8"?>
     <Envelope xmlns:dn="http://www.onvif.org/ver10/network/wsdl" xmlns="http://www.w3.org/2003/05/soap-envelope">
@@ -31,43 +30,50 @@ def discover_onvif_cameras(timeout: int = 3) -> List[dict[str, Any]]:
     </Envelope>"""
 
     cam_results = []
+    seen_ips = set()
     
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
         sock.settimeout(timeout)
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 4)
         
-        logger.info(f"Broadcast WS-Discovery ONVIF enviado na rede (Timeout: {timeout}s)...")
+        logger.info(f"Broadcast WS-Discovery ONVIF enviado (Timeout: {timeout}s)...")
         sock.sendto(payload.encode('utf-8'), (WS_DISCOVERY_IP, WS_DISCOVERY_PORT))
 
         while True:
             try:
                 data, addr = sock.recvfrom(65536)
                 ip = addr[0]
+                if ip in seen_ips:
+                    continue
+                
                 response = data.decode('utf-8', errors='ignore')
                 
-                # Checa a existência de IPs diferentes via XAddrs
                 if "XAddrs" in response or "onvif" in response.lower():
-                    logger.info(f"Câmera ONVIF Compatível encontrada em: {ip}")
+                    logger.info(f"Câmera ONVIF detectada em: {ip}")
+                    seen_ips.add(ip)
                     
-                    # Tenta inferir porta comum ONVIF RTSP se não explícito
-                    default_rtsp = 554
-                    if "http://" in response:
-                        # Extração simples apenas para ilustrar, o app montará a string RTSP baseada no IP
-                        pass
-                        
+                    # Sugestões de RTSP baseadas no IP e marcas comuns (Hikvision, Intelbras, Dahua)
+                    paths = [
+                        "/cam/realmonitor?channel=1&subtype=0", # Intelbras/Dahua
+                        "/h264/ch1/main/av_stream",            # Hikvision
+                        "/live/main",                          # Genérica
+                        "/onvif1"                              # Genérica ONVIF
+                    ]
+                    
                     cam_results.append({
                         "ip": ip,
-                        "ports": [80, 554, 8999], # Assume default ports para Hikvision/Intelbras
+                        "brand_hint": "Intelbras/Hikvision/Dahua" if "XAddrs" in response else "Generic",
+                        "ports": [80, 554, 8000, 8999], 
+                        "rtsp_suggestions": [f"rtsp://admin:admin@{ip}{p}" for p in paths],
                         "confidence": "high",
                         "status": "ok",
-                        "reason_code": "onvif_ws_discovery_match",
-                        "raw_response_len": len(response)
+                        "reason_code": "onvif_ws_discovery_match"
                     })
             except socket.timeout:
                 break
     except Exception as e:
-        logger.error(f"Erro durante o scan UDP ONVIF: {e}")
+        logger.error(f"Erro no scan UDP ONVIF: {e}")
     finally:
         sock.close()
         

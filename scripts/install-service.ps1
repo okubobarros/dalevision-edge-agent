@@ -551,8 +551,33 @@ function Invoke-InstallService {
       Invoke-Schtasks -SchtasksArgs $updateArgs | Out-Null
     }
 
+    Write-Log "Tentando iniciar o runtime agent (`$TaskName) imediatamente..."
+    try {
+      Invoke-Schtasks -SchtasksArgs @("/Run", "/TN", $TaskName) | Out-Null
+      Write-Log "Task '$TaskName' iniciada com sucesso via /Run."
+    } catch {
+      Write-Log "AVISO: Nao foi possivel iniciar a task automaticamente. Aguardando proximo restart/logon. Erro: $($_.Exception.Message)"
+    }
+
     Write-Log "Servico instalado com sucesso."
     Write-Log "RESULT: $resultLabel"
+    
+    # Abrir Dashboard automaticamente para concluir onboarding
+    $storeId = $envVars["STORE_ID"]
+    if (-not [string]::IsNullOrWhiteSpace($storeId)) {
+        $baseUrl = "https://app.dale.vision"
+        if ($envVars["API_BASE_URL"] -match "localhost|127.0.0.1") {
+            $baseUrl = "http://localhost:5173"
+        }
+        $targetUrl = "${baseUrl}/dashboard?activation_success=true&store_id=${storeId}"
+        Write-Log "Abrindo navegador em: $targetUrl"
+        try {
+            Start-Process $targetUrl
+        } catch {
+            Write-Log "Nao foi possivel abrir o navegador automaticamente."
+        }
+    }
+
     Write-Log "Task: $TaskName"
     Write-Log "Para remover: execute uninstall-service.ps1 ou use: schtasks /Delete /TN `"$TaskName`" /F"
     Write-Log "Para checar status: schtasks /Query /TN `"$TaskName`" /V /FO LIST"

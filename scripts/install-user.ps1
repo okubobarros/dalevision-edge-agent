@@ -75,22 +75,22 @@ function Get-MaskedToken {
 
 function Stop-ExistingDaleVisionProcesses {
   try {
+    Write-Log "INSTALL000 scanning_processes"
     $candidates = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
       ($_.Name -match "dalevision-edge-agent\.exe") -or
-      (
-        ($_.Name -match "powershell\.exe|pwsh\.exe|cmd\.exe") -and
-        ($_.CommandLine -match "Start_DaleVision_Agent\.ps1|DaleVision\\app\\")
-      )
+      ($_.CommandLine -match "DaleVision\\app") -or 
+      ($_.CommandLine -match "Start_DaleVision_Agent\.ps1")
     }
     foreach ($proc in $candidates) {
       try {
         Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
-        Write-Log ("INSTALL000A process_stopped pid={0} name={1}" -f $proc.ProcessId, $proc.Name)
+        Write-Log ("INSTALL000A process_killed pid={0} name={1}" -f $proc.ProcessId, $proc.Name)
       } catch {
-        Write-Log ("INSTALL000B process_stop_failed pid={0} name={1} err={2}" -f $proc.ProcessId, $proc.Name, $_.Exception.Message)
+        Write-Log ("INSTALL000B process_kill_failed pid={0} name={1} err={2}" -f $proc.ProcessId, $proc.Name, $_.Exception.Message)
       }
     }
-    Start-Sleep -Milliseconds 800
+    # Wait a bit more for OS to release file handles
+    Start-Sleep -Seconds 2
   } catch {
     Write-Log ("INSTALL000C process_scan_failed err={0}" -f $_.Exception.Message)
   }
@@ -360,18 +360,9 @@ Start-Process -FilePath $runCmd -WorkingDirectory $targetRoot -WindowStyle Hidde
 Write-Log "INSTALL007 run_started"
 $shouldOpenDashboard = Parse-BoolString -RawValue $OpenDashboard
 if ($shouldOpenDashboard) {
-  try {
-    $storeForRedirect = ""
-    if ($agentConfig.ContainsKey("store_id")) {
-      $storeForRedirect = [string]$agentConfig["store_id"]
-    }
-    $appUrl = Resolve-AppDashboardUrl -CloudBaseUrl $CloudBaseUrl -StoreId $storeForRedirect
-    Start-Process -FilePath $appUrl | Out-Null
-    Write-Log ("INSTALL008 app_opened url={0}" -f $appUrl)
-  } catch {
-    Write-Log ("INSTALL008E app_open_failed err={0}" -f $_.Exception.Message)
-  }
+  Write-Log "INSTALL008 agent_headless_mode_active (browser opening skipped to maintain dashboard context)"
+  # No dashboard opening from the installer; the Cloud App Modal is already polling localhost:8787
 } else {
-  Write-Log "INSTALL008S app_open_skipped"
+  Write-Log "INSTALL008 app_open_skipped"
 }
 Write-Log "INSTALL999 ok"

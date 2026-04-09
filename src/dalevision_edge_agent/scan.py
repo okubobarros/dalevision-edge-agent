@@ -158,6 +158,8 @@ def build_discovery_candidates(scan_results: list[dict[str, Any]]) -> list[dict[
         normalized.append(
             {
                 "ip": ip,
+                "brand_hint": item.get("brand_hint") or "Generic",
+                "rtsp_suggestions": item.get("rtsp_suggestions") or [],
                 "ports": sorted(ports),
                 "confidence": confidence,
                 "status": status,

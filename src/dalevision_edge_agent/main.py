@@ -534,6 +534,37 @@ def _parse_int_env(name: str, default: int) -> int:
         raise ValueError(f"Invalid integer for {name}: {raw}") from exc
 
 
+def _start_setup_api_background(*, logger: logging.Logger) -> None:
+    enabled = _parse_bool_env("EDGE_SETUP_API_ENABLED", True)
+    if not enabled:
+        logger.info("[SETUP_API] disabled by EDGE_SETUP_API_ENABLED=0")
+        return
+
+    host = str(os.getenv("EDGE_SETUP_API_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    raw_port = str(os.getenv("EDGE_SETUP_API_PORT") or "8787").strip()
+    try:
+        port = int(raw_port)
+    except ValueError:
+        logger.warning("[SETUP_API] invalid EDGE_SETUP_API_PORT=%s; fallback=8787", raw_port)
+        port = 8787
+
+    def _runner() -> None:
+        try:
+            serve_setup_api(
+                host=host,
+                port=port,
+                discovery_provider=lambda: run_scan(logger=logger),
+                logger=logger,
+            )
+        except OSError as exc:
+            logger.warning("[SETUP_API] bind failed host=%s port=%s error=%s", host, port, exc)
+        except Exception:
+            logger.exception("[SETUP_API] unexpected failure")
+
+    threading.Thread(target=_runner, name="dalevision-setup-api", daemon=True).start()
+    logger.info("[SETUP_API] bootstrap host=%s port=%s", host, port)
+
+
 def _parse_cameras_json(
     raw: str,
     logger: logging.Logger,
@@ -1506,6 +1537,8 @@ def main() -> int:
             version=version,
             logger=logger,
         )
+
+    _start_setup_api_background(logger=logger)
 
     activation_runtime_config = ConfigManager.from_default().load()
     device_key, installed_version, update_channel = _resolve_device_identity(

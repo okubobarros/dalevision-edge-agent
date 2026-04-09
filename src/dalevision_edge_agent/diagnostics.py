@@ -250,30 +250,44 @@ def _edge_auth_check(
 ) -> dict[str, Any]:
     if not cloud_base_url or not store_id or not edge_token:
         return {"ok": False, "error": "missing_store_or_token"}
-    url = f"{cloud_base_url.rstrip('/')}/api/v1/stores/{store_id}/cameras/"
-    try:
-        response = requests.get(url, headers=build_auth_headers(edge_token), timeout=5)
-        status = response.status_code
-        if 200 <= status < 300:
-            payload = {}
-            try:
-                payload = response.json()
-            except Exception:
-                payload = {}
-            cameras = payload.get("results") if isinstance(payload, dict) else None
-            if cameras is None and isinstance(payload, list):
-                cameras = payload
-            count = len(cameras) if isinstance(cameras, list) else None
-            return {"ok": True, "status": status, "count": count}
-        detail = None
+    base = cloud_base_url.rstrip("/")
+    urls = [
+        f"{base}/api/edge/stores/{store_id}/cameras/",
+        f"{base}/api/edge/cameras/",
+        f"{base}/api/v1/stores/{store_id}/cameras/",
+    ]
+    tried: list[dict[str, Any]] = []
+    for url in urls:
         try:
-            detail = response.json()
-        except Exception:
-            detail = response.text.strip()[:500] if response.text else None
-        return {"ok": False, "status": status, "error": detail or f"HTTP {status}"}
-    except requests.RequestException as exc:
-        logger.info("EDGEAUTH url=%s error=%s", url, exc)
-        return {"ok": False, "error": str(exc)}
+            response = requests.get(url, headers=build_auth_headers(edge_token), timeout=5)
+            status = response.status_code
+            if 200 <= status < 300:
+                payload = {}
+                try:
+                    payload = response.json()
+                except Exception:
+                    payload = {}
+                cameras = payload.get("results") if isinstance(payload, dict) else None
+                if cameras is None and isinstance(payload, list):
+                    cameras = payload
+                count = len(cameras) if isinstance(cameras, list) else None
+                return {"ok": True, "status": status, "count": count, "url": url, "tried": tried}
+            detail = None
+            try:
+                detail = response.json()
+            except Exception:
+                detail = response.text.strip()[:500] if response.text else None
+            tried.append({"url": url, "status": status, "error": detail or f"HTTP {status}"})
+        except requests.RequestException as exc:
+            logger.info("EDGEAUTH url=%s error=%s", url, exc)
+            tried.append({"url": url, "error": str(exc)})
+    last = tried[-1] if tried else {"error": "unknown"}
+    return {
+        "ok": False,
+        "status": last.get("status"),
+        "error": last.get("error"),
+        "tried": tried,
+    }
 
 
 def run_doctor(
