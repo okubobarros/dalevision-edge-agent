@@ -589,11 +589,11 @@ function Invoke-InstallService {
     # Abrir Dashboard automaticamente para concluir onboarding
     $storeId = $envVars["STORE_ID"]
     if (-not [string]::IsNullOrWhiteSpace($storeId)) {
-        $baseUrl = "https://app.dale.vision"
+        $baseUrl = "https://app.dalevision.com"
         if ($envVars["API_BASE_URL"] -match "localhost|127.0.0.1") {
             $baseUrl = "http://localhost:5173"
         }
-        $targetUrl = "${baseUrl}/dashboard?activation_success=true&store_id=${storeId}"
+        $targetUrl = "${baseUrl}/app/dashboard?activation_success=true&store_id=${storeId}"
         Write-Log "Abrindo navegador em: $targetUrl"
         try {
             Start-Process $targetUrl
