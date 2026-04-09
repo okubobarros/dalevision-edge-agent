@@ -540,7 +540,7 @@ def _start_setup_api_background(*, logger: logging.Logger) -> None:
         logger.info("[SETUP_API] disabled by EDGE_SETUP_API_ENABLED=0")
         return
 
-    host = str(os.getenv("EDGE_SETUP_API_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    host = str(os.getenv("EDGE_SETUP_API_HOST") or "0.0.0.0").strip() or "0.0.0.0"
     raw_port = str(os.getenv("EDGE_SETUP_API_PORT") or "8787").strip()
     try:
         port = int(raw_port)
@@ -557,9 +557,9 @@ def _start_setup_api_background(*, logger: logging.Logger) -> None:
                 logger=logger,
             )
         except OSError as exc:
-            logger.warning("[SETUP_API] bind failed host=%s port=%s error=%s", host, port, exc)
+            logger.error("[SETUP_API] FATAL: Bind failed host=%s port=%s. Is the port already in use? error=%s", host, port, exc)
         except Exception:
-            logger.exception("[SETUP_API] unexpected failure")
+            logger.exception("[SETUP_API] FATAL: Unexpected failure during startup")
 
     threading.Thread(target=_runner, name="dalevision-setup-api", daemon=True).start()
     logger.info("[SETUP_API] bootstrap host=%s port=%s", host, port)

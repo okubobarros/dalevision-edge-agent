@@ -137,6 +137,8 @@ def serve_setup_api(
     discovery_provider: DiscoveryProvider,
     logger: Optional[logging.Logger] = None,
 ) -> None:
+    # O host padrão de escuta deve ser 0.0.0.0 para garantir acessibilidade loopback no Windows.
+    host = host or "0.0.0.0"
     logger = logger or logging.getLogger(__name__)
 
     class Handler(BaseHTTPRequestHandler):

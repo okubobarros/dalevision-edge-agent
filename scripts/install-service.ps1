@@ -265,6 +265,22 @@ function Get-StartupTaskEnabled {
   return $true
 }
 
+function Add-FirewallRule {
+  param([int]$Port)
+  $ruleName = "DaleVision Edge Setup API (TCP-In)"
+  Write-Log "FIREWALL: Verificando regra para porta $Port..."
+  if (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue) {
+    Write-Log "FIREWALL: Regra já existe."
+    return
+  }
+  try {
+    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow -Description "Permite que o dashboard se comunique localmente com o agente para onboarding e diagnostico." | Out-Null
+    Write-Log "FIREWALL: Regra criada com sucesso para porta $Port."
+  } catch {
+    Write-Log "FIREWALL_AVISO: Nao foi possivel criar regra de firewall. Verifique manualmente se a porta $Port esta aberta."
+  }
+}
+
 function Invoke-InstallService {
   param(
     [string]$InstallDir = $PSScriptRoot,
@@ -560,7 +576,15 @@ function Invoke-InstallService {
     }
 
     Write-Log "Servico instalado com sucesso."
+    Add-FirewallRule -Port 8787
     Write-Log "RESULT: $resultLabel"
+    
+    Write-Host "`n"
+    Write-Host "*******************************************************************************" -ForegroundColor Cyan
+    Write-Host "   ✅ INSTALACAO CONCLUIDA COM SUCESSO!" -ForegroundColor Green
+    Write-Host "   Por favor, VOLTE AO NAVEGADOR para continuar a configuracao da sua loja." -ForegroundColor White -BackgroundColor Blue
+    Write-Host "*******************************************************************************" -ForegroundColor Cyan
+    Write-Host "`n"
     
     # Abrir Dashboard automaticamente para concluir onboarding
     $storeId = $envVars["STORE_ID"]
