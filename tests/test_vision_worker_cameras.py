@@ -17,6 +17,7 @@ def test_fetch_cameras_uses_cameras_json_without_v1_calls(mock_get, monkeypatch,
     monkeypatch.setenv("CAMERA_SYNC_ENABLED", "0")
     monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
     monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
     worker = VisionWorker(
         cloud_base_url="https://api.example.com",
@@ -42,6 +43,7 @@ def test_fetch_cameras_prefers_api_when_source_mode_api_first(mock_get, monkeypa
     monkeypatch.setenv("VISION_REMOTE_CAMERA_SYNC_ENABLED", "1")
     monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
     monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
     response = Mock()
     response.status_code = 200
@@ -80,6 +82,7 @@ def test_fetch_cameras_uses_env_file_fallback_when_process_env_is_empty(mock_get
     monkeypatch.setenv("CAMERA_SYNC_ENABLED", "0")
     monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
     monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.chdir(tmp_path)
 
     worker = VisionWorker(
@@ -123,6 +126,7 @@ def test_fetch_cameras_enriches_local_cameras_with_remote_roi(mock_fetch_roi, mo
     monkeypatch.setenv("VISION_LOCAL_CAMERAS_ONLY", "1")
     monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
     monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
 
     worker = VisionWorker(
         cloud_base_url="https://api.example.com",
@@ -156,6 +160,37 @@ def test_resolve_role_maps_caixa_name_to_balcao() -> None:
     )
 
     assert role == "balcao"
+
+
+@patch("dalevision_edge_agent.vision.worker.requests.get")
+def test_fetch_cameras_normalizes_indicators_from_cameras_json(mock_get, monkeypatch, tmp_path) -> None:
+    cameras_payload = [
+        {
+            "id": "cam-1",
+            "name": "Cam Entrada",
+            "rtsp_url": "rtsp://10.0.0.10:554/stream",
+            "indicators": ["entrada", "queue"],
+        },
+    ]
+    monkeypatch.setenv("CAMERAS_JSON", json.dumps(cameras_payload))
+    monkeypatch.setenv("CAMERA_SYNC_ENABLED", "0")
+    monkeypatch.setenv("VISION_CAMERAS_CACHE_PATH", str(tmp_path / "cameras_cache.json"))
+    monkeypatch.setenv("ProgramData", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    worker = VisionWorker(
+        cloud_base_url="https://api.example.com",
+        store_id="store-1",
+        edge_token="token",
+        logger=Mock(),
+    )
+
+    cameras = worker._fetch_cameras()
+
+    assert cameras[0]["indicators"] == ["flow", "queue"]
+    assert cameras[0]["processing_plan"]["flow"] is True
+    assert cameras[0]["processing_plan"]["queue"] is True
+    mock_get.assert_not_called()
 
 
 def test_extract_roi_uses_remote_roi_when_local_roi_is_empty() -> None:

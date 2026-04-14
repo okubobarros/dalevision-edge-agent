@@ -5,7 +5,12 @@ DISTRIBUICAO RECOMENDADA
 - Fallback tecnico: dalevision-edge-agent-windows.zip.
 
 SETUP.EXE COM TOKEN (RECOMENDADO NO ONBOARDING)
-- O instalador aceita token por parametro e grava em %%APPDATA%%\DaleVision\agent_config.json.
+- O instalador aceita token sem CMD por tela no wizard ou automaticamente pelo nome do arquivo.
+- O token e encaminhado ao bootstrap e gravado em %%APPDATA%%\DaleVision\agent_config.json.
+- Fluxo recomendado: baixar e abrir o .exe normalmente; se nao houver token embutido no nome, o wizard pede "Token de Ativacao".
+- Fluxo silencioso opcional por nome de arquivo:
+  DaleVisionEdgeSetup_tk_SEU_TOKEN.exe
+- Compatibilidade mantida com linha de comando:
 - Exemplo (token direto):
   DaleVisionEdgeSetup-vX.Y.Z.exe /ACTIVATION_TOKEN=SEU_TOKEN
 - Exemplo (token em arquivo):

@@ -38,6 +38,11 @@ from .activation import (
     bootstrap_activation,
     hydrate_runtime_env_from_activation_config,
 )
+from .camera_config import (
+    build_camera_processing_plan,
+    load_cameras_from_agent_config,
+    normalize_indicator_list,
+)
 from .diagnostics import run_doctor
 from .env import InvalidTokenError, describe_env_file, load_env_from_cwd, load_settings
 from .heartbeat import REQUEST_TIMEOUT_SECONDS, send_heartbeat
@@ -593,6 +598,8 @@ def _parse_cameras_json(
         normalized["id"] = camera_id
         normalized["camera_id"] = camera_id
         normalized["name"] = str(item.get("name") or "").strip()
+        normalized["indicators"] = normalize_indicator_list(item.get("indicators"))
+        normalized["processing_plan"] = build_camera_processing_plan(normalized)
         if rtsp_url:
             normalized["rtsp_url"] = rtsp_url
         if ip:
@@ -1408,6 +1415,10 @@ def main() -> int:
     )
     camera_source_mode = _resolve_camera_source_mode()
     cameras_json_raw = os.getenv("CAMERAS_JSON") or ""
+    if not str(cameras_json_raw or "").strip():
+        config_cameras = load_cameras_from_agent_config()
+        if config_cameras:
+            cameras_json_raw = json.dumps(config_cameras, ensure_ascii=True)
     cameras_json_list, cameras_json_error = _parse_cameras_json(cameras_json_raw, logger)
     if cameras_json_error:
         logger.error("[CAMERA_HEALTH] %s", cameras_json_error)

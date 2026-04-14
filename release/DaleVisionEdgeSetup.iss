@@ -38,5 +38,120 @@ Source: "{#SourceDir}\*"; DestDir: "{tmp}\dalevision_payload"; Flags: recursesub
 
 [Run]
 Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\dalevision_payload\scripts\install-user.ps1"" -SourceRoot ""{tmp}\dalevision_payload"" -Version ""{#AppVersion}"" -ActivationToken ""{param:ACTIVATION_TOKEN|}"" -ActivationTokenFile ""{param:ACTIVATION_TOKEN_FILE|}"" -CloudBaseUrl ""{param:CLOUD_BASE_URL|}"" -OpenDashboard ""{param:OPEN_DASHBOARD|0}"""; \
+  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{tmp}\dalevision_payload\scripts\install-user.ps1"" -SourceRoot ""{tmp}\dalevision_payload"" -Version ""{#AppVersion}"" -ActivationToken ""{code:GetEffectiveActivationToken}"" -ActivationTokenFile ""{param:ACTIVATION_TOKEN_FILE|}"" -CloudBaseUrl ""{param:CLOUD_BASE_URL|}"" -OpenDashboard ""{param:OPEN_DASHBOARD|0}"""; \
   Flags: runhidden waituntilterminated
+
+[Code]
+var
+  ActivationPage: TInputQueryWizardPage;
+  ActivationTokenDetectedFromFilename: String;
+
+function TrimExeExtension(const FileName: String): String;
+begin
+  Result := FileName;
+  if CompareText(ExtractFileExt(Result), '.exe') = 0 then
+    Result := Copy(Result, 1, Length(Result) - 4);
+end;
+
+function DecodeTokenFromFilename(const RawFileName: String): String;
+var
+  NameNoExt: String;
+  MarkerPos: Integer;
+  Marker: String;
+begin
+  Result := '';
+  NameNoExt := TrimExeExtension(ExtractFileName(RawFileName));
+
+  Marker := '_tk_';
+  MarkerPos := Pos(Marker, LowerCase(NameNoExt));
+  if MarkerPos = 0 then
+  begin
+    Marker := '-tk-';
+    MarkerPos := Pos(Marker, LowerCase(NameNoExt));
+  end;
+  if MarkerPos = 0 then
+  begin
+    Marker := '_token_';
+    MarkerPos := Pos(Marker, LowerCase(NameNoExt));
+  end;
+  if MarkerPos = 0 then
+  begin
+    Marker := '-token-';
+    MarkerPos := Pos(Marker, LowerCase(NameNoExt));
+  end;
+
+  if MarkerPos > 0 then
+    Result := Trim(Copy(NameNoExt, MarkerPos + Length(Marker), MaxInt));
+end;
+
+function GetActivationTokenFromParam: String;
+begin
+  Result := Trim(ExpandConstant('{param:ACTIVATION_TOKEN|}'));
+end;
+
+function GetActivationTokenFromFilename: String;
+begin
+  if ActivationTokenDetectedFromFilename = '' then
+    ActivationTokenDetectedFromFilename := DecodeTokenFromFilename(ExpandConstant('{srcexe}'));
+  Result := ActivationTokenDetectedFromFilename;
+end;
+
+function HasPreseededActivationToken: Boolean;
+begin
+  Result :=
+    (GetActivationTokenFromParam <> '') or
+    (Trim(ExpandConstant('{param:ACTIVATION_TOKEN_FILE|}')) <> '') or
+    (GetActivationTokenFromFilename <> '');
+end;
+
+function GetEffectiveActivationToken(Param: String): String;
+begin
+  Result := GetActivationTokenFromParam;
+  if Result = '' then
+    Result := GetActivationTokenFromFilename;
+  if (Result = '') and Assigned(ActivationPage) then
+    Result := Trim(ActivationPage.Values[0]);
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if Assigned(ActivationPage) and (CurPageID = ActivationPage.ID) then
+  begin
+    if Trim(ActivationPage.Values[0]) = '' then
+    begin
+      MsgBox(
+        'Cole o Token de Ativacao para continuar.' + #13#10 + #13#10 +
+        'Se preferir, feche este instalador e renomeie o arquivo para algo como:' + #13#10 +
+        'DaleVisionEdgeSetup_tk_SEU_TOKEN.exe',
+        mbError,
+        MB_OK
+      );
+      Result := False;
+    end;
+  end;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if Assigned(ActivationPage) and (PageID = ActivationPage.ID) then
+    Result := HasPreseededActivationToken;
+end;
+
+procedure InitializeWizard;
+var
+  AutoToken: String;
+begin
+  ActivationPage := CreateInputQueryPage(
+    wpWelcome,
+    'Ativacao da Loja',
+    'Cole o token para conectar este computador a sua loja',
+    'O token nao aparece em logs do instalador. Se este setup ja foi baixado com token no nome do arquivo, esta etapa sera pulada automaticamente.'
+  );
+  ActivationPage.Add('&Token de Ativacao:', False);
+
+  AutoToken := GetActivationTokenFromFilename;
+  if AutoToken <> '' then
+    ActivationPage.Values[0] := AutoToken;
+end;

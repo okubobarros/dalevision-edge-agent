@@ -1,15 +1,9 @@
 from __future__ import annotations
 
-import ipaddress
 import logging
-import socket
-from typing import Any, Optional
+from typing import Any
 
-from .diagnostics import _parse_ipconfig, _run_cmd
-
-SCAN_PORTS = (80, 443, 554, 37777)
-SCAN_TIMEOUT_SECONDS = 0.2
-MAX_SCAN_WORKERS = 64
+from .scanner import scan_network
 PLAN_CAMERA_LIMITS = {
     "trial": 3,
     "start": 6,
@@ -42,57 +36,7 @@ ONBOARDING_INDICATORS = [
         "required": False,
     },
 ]
-
-
-def _scan_range(ipv4: str, logger: logging.Logger) -> list[dict[str, Any]]:
-    try:
-        network = ipaddress.ip_network(f"{ipv4}/24", strict=False)
-    except Exception:
-        return []
-
-    logger.info("NETSCAN scanning %s ports=%s", network, ",".join(str(p) for p in SCAN_PORTS))
-    results: list[dict[str, Any]] = []
-
-    def check_host(host: str) -> Optional[dict[str, Any]]:
-        open_ports = []
-        for port in SCAN_PORTS:
-            try:
-                with socket.create_connection((host, port), timeout=SCAN_TIMEOUT_SECONDS):
-                    open_ports.append(port)
-            except OSError:
-                continue
-        if open_ports:
-            score = 0
-            if 554 in open_ports:
-                score += 3
-            if 37777 in open_ports:
-                score += 2
-            if 80 in open_ports or 443 in open_ports:
-                score += 1
-            return {
-                "ip": host,
-                "ports": open_ports,
-                "confidence": "high" if score >= 4 else "medium" if score >= 2 else "low",
-            }
-        return None
-
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    with ThreadPoolExecutor(max_workers=MAX_SCAN_WORKERS) as executor:
-        futures = []
-        for host in network.hosts():
-            futures.append(executor.submit(check_host, str(host)))
-        for future in as_completed(futures):
-            result = future.result()
-            if result:
-                results.append(result)
-    return sorted(results, key=lambda item: item["ip"])
-
-
 def run_scan(*, logger: logging.Logger) -> list[dict[str, Any]]:
-    ipconfig_text = _run_cmd("ipconfig /all")
-    parsed = _parse_ipconfig(ipconfig_text)
-    ipv4 = parsed.get("ipv4")
     results = []
 
     # 1. WS-Discovery Automático (Frictionless ONVIF)
@@ -105,17 +49,15 @@ def run_scan(*, logger: logging.Logger) -> list[dict[str, Any]]:
     except Exception as exc:
         logger.warning(f"ONVIF Auto-Discovery skipado/falhou: {exc}")
 
-    # 2. Fallback Scan Direto
-    if ipv4:
-        fallback_results = _scan_range(ipv4, logger)
-        if fallback_results:
-            # Elimina duplicados baseados no IP inserido pelo ONVIF
-            found_ips = {r["ip"] for r in results}
-            for fr in fallback_results:
-                if fr["ip"] not in found_ips:
-                    results.append(fr)
+    # 2. Fallback Scan TCP assíncrono por sub-rede local
+    fallback_results = scan_network()
+    if fallback_results:
+        found_ips = {str(r.get("ip") or "") for r in results}
+        for row in fallback_results:
+            if str(row.get("ip") or "") not in found_ips:
+                results.append(row)
     else:
-        logger.warning("NET001 sem IP local detectado")
+        logger.warning("NET001 sem candidatos no scan TCP local")
 
     if not results:
         logger.info("NETSCAN nenhum candidato encontrado")
@@ -140,7 +82,9 @@ def build_discovery_candidates(scan_results: list[dict[str, Any]]) -> list[dict[
 
         has_rtsp = 554 in ports
         has_nvr = 37777 in ports
-        has_http = 80 in ports or 443 in ports
+        has_http = 80 in ports
+        has_hik = 8000 in ports
+        has_onvif = 8999 in ports
 
         if has_rtsp:
             status = "ok"
@@ -148,6 +92,12 @@ def build_discovery_candidates(scan_results: list[dict[str, Any]]) -> list[dict[
         elif has_nvr:
             status = "warning"
             reason_code = "nvr_port_open_rtsp_unknown"
+        elif has_hik:
+            status = "warning"
+            reason_code = "hikvision_control_port_open_rtsp_unknown"
+        elif has_onvif:
+            status = "warning"
+            reason_code = "onvif_port_open_rtsp_unknown"
         elif has_http:
             status = "warning"
             reason_code = "http_only_device"

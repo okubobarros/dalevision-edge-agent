@@ -1,4 +1,5 @@
 CHANGELOG (resumo)
+- Setup Inno agora aceita token sem CMD: wizard com campo de ativacao e auto-deteccao via nome do arquivo.
 - Nomes simplificados para o pacote (01/02/03/99 e LEIA_ANTES).
 - install-service.ps1 agora procura arquivos no mesmo diretorio e loga em ProgramData.
 - Compatibilidade mantida com nomes antigos de arquivos.

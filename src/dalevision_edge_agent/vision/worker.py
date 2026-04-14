@@ -16,6 +16,11 @@ import requests
 from dotenv import dotenv_values
 
 from ..cameras import _ffmpeg_path, build_auth_headers, fetch_roi, mask_rtsp_url
+from ..camera_config import (
+    build_camera_processing_plan,
+    load_cameras_from_agent_config,
+    normalize_indicator_list,
+)
 from ..events import compute_idempotency_key
 from .outbox import VisionOutbox
 from .geometry import line_side, point_in_polygon
@@ -522,6 +527,7 @@ class VisionWorker:
         ).strip()
         if not camera_id or (not rtsp_url and not snapshot_url):
             return None
+        indicators = normalize_indicator_list(cam.get("indicators"))
         return {
             **cam,
             "id": camera_id,
@@ -530,6 +536,8 @@ class VisionWorker:
             "last_snapshot_url": snapshot_url,
             "name": str(cam.get("name") or "").strip(),
             "external_id": str(cam.get("external_id") or cam.get("name") or "").strip(),
+            "indicators": indicators,
+            "processing_plan": build_camera_processing_plan({**cam, "indicators": indicators}),
         }
 
     def _canonical_shape_name(self, name: str) -> str:
@@ -724,6 +732,10 @@ class VisionWorker:
         cameras_json_raw = _env_str("CAMERAS_JSON", "")
         if not cameras_json_raw.strip():
             cameras_json_raw = self._load_cameras_json_from_env_file()
+        if not cameras_json_raw.strip():
+            config_cameras = load_cameras_from_agent_config()
+            if config_cameras:
+                cameras_json_raw = json.dumps(config_cameras, ensure_ascii=True)
         cameras_from_env, env_error = self._parse_cameras_json(cameras_json_raw, source="CAMERAS_JSON")
         if env_error:
             self.logger.warning("[VISION] %s", env_error)
@@ -1517,6 +1529,8 @@ class VisionWorker:
             "store_id": self.store_id,
             "camera_id": str(cam.get("camera_id") or cam.get("id") or ""),
             "camera_role": role or "unknown",
+            "indicators": normalize_indicator_list(cam.get("indicators")),
+            "processing_plan": build_camera_processing_plan(cam),
             "roi_version": (cam.get("roi") or {}).get("roi_version"),
             "bucket": {
                 "seconds": self.cfg.bucket_seconds,

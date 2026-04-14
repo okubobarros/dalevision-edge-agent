@@ -15,6 +15,20 @@ def test_build_discovery_candidates_nvr_warning():
     assert out[0]["reason_code"] == "nvr_port_open_rtsp_unknown"
 
 
+def test_build_discovery_candidates_hikvision_warning():
+    rows = [{"ip": "192.168.0.15", "ports": [8000], "confidence": "medium"}]
+    out = build_discovery_candidates(rows)
+    assert out[0]["status"] == "warning"
+    assert out[0]["reason_code"] == "hikvision_control_port_open_rtsp_unknown"
+
+
+def test_build_discovery_candidates_onvif_warning():
+    rows = [{"ip": "192.168.0.16", "ports": [8999], "confidence": "medium"}]
+    out = build_discovery_candidates(rows)
+    assert out[0]["status"] == "warning"
+    assert out[0]["reason_code"] == "onvif_port_open_rtsp_unknown"
+
+
 def test_build_discovery_candidates_fail_when_no_supported_ports():
     rows = [{"ip": "192.168.0.12", "ports": [], "confidence": "low"}]
     out = build_discovery_candidates(rows)
