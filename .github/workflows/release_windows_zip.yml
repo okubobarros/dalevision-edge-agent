@@ -22,11 +22,21 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Validate release registry config
+        shell: pwsh
+        env:
+          EDGE_RELEASES_DATABASE_URL: ${{ secrets.EDGE_RELEASES_DATABASE_URL }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:EDGE_RELEASES_DATABASE_URL)) {
+            throw "Missing GitHub secret EDGE_RELEASES_DATABASE_URL. The release pipeline now syncs GitHub tags to edge_releases automatically."
+          }
+
       - name: Install build deps
         run: |
           python -m pip install --upgrade pip
           python -m pip install ".[vision]"
           python -m pip install pyinstaller
+          python -m pip install "psycopg[binary]>=3.2.0"
 
       - name: Verify vision runtime deps
         run: |
@@ -71,3 +81,9 @@ jobs:
             DaleVisionEdgeSetup-*.exe
           name: ${{ github.ref_name }}
           generate_release_notes: true
+
+      - name: Sync edge_releases
+        env:
+          EDGE_RELEASES_DATABASE_URL: ${{ secrets.EDGE_RELEASES_DATABASE_URL }}
+        run: |
+          python .\scripts\sync_edge_release.py --tag $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --asset-path .\dalevision-edge-agent-windows.zip

@@ -129,3 +129,8 @@ dalevision-edge-agent.exe scan --mode nvr --range auto
 
 ## Documentação
 Documentação detalhada, specs e runbooks ficam no repositório interno do time.
+
+Release e atualização
+- `git push` comum não publica release nem atualiza `edge_releases`.
+- O fluxo automático de release + registro em `edge_releases` acontece em `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- Runbook: `docs/field-ops/release-runbook.md`.
