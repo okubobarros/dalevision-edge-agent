@@ -14,7 +14,16 @@ Checklist
 - Atualizar URLs de distribuição:
   - `EDGE_WINDOWS_SETUP_URL` (Render/infra)
   - `VITE_EDGE_AGENT_DOWNLOAD_URL` (Vercel FE)
-  - Formato: `https://github.com/okubobarros/dalevision-edge-agent/releases/download/vX.Y.Z/DaleVisionEdgeSetup-vX.Y.Z.exe`.
+  - Padrão estável (recomendado): `https://github.com/okubobarros/dalevision-edge-agent/releases/latest/download/DaleVisionEdgeSetup-latest.exe`.
+  - Apenas quando precisar fixar versão: `https://github.com/okubobarros/dalevision-edge-agent/releases/download/vX.Y.Z/DaleVisionEdgeSetup-vX.Y.Z.exe`.
+
+Política de release limpa (obrigatória)
+- Nunca commitar `.exe`, `.zip` e artefatos de build no Git.
+- Artefatos de distribuição existem somente em GitHub Releases (assets da tag).
+- A pipeline publica sempre dois nomes de asset:
+  - imutável por versão (`DaleVisionEdgeSetup-vX.Y.Z.exe`, `dalevision-edge-agent-windows.zip`);
+  - estável para ambiente (`DaleVisionEdgeSetup-latest.exe`, `dalevision-edge-agent-windows-latest.zip`).
+- Em frontend/backend, preferir URL estável (`releases/latest/download/...`) para evitar trocar env a cada release.
 
 Automação da tabela `edge_releases`
 - `git push` comum não atualiza release nem a tabela `edge_releases`.

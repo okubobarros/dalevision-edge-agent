@@ -20,6 +20,7 @@
 - [x] Etapa 1 (Edge): telemetria de onboarding no runtime (`onboarding_started`, `agent_first_heartbeat`, `activation_failed`).
 - [x] Etapa 2 (Edge): telemetria de discovery/validacao (`camera_discovered`, `camera_validated`, `activation_completed`) + campos opcionais no heartbeat (`onboarding_ref`, `agent_capabilities`).
 - [x] Normalizar `error_code` no `activation_failed` (heartbeat + camera health) com deduplicacao de eventos.
+- [x] Politica de release limpa: assets versionados + aliases `latest` no GitHub Releases, sem binarios no git.
 - [ ] Dashboard com taxa de ativacao e tempo para ativar.
 - [ ] Implementar Etapa 0 (`activation_state`) no repositorio `dale-vision`.
 

@@ -138,4 +138,5 @@ Documentação detalhada, specs e runbooks ficam no repositório interno do time
 Release e atualização
 - `git push` comum não publica release nem atualiza `edge_releases`.
 - O fluxo automático de release + registro em `edge_releases` acontece em `git tag vX.Y.Z && git push origin vX.Y.Z`.
+- URL estável para setup em ambientes (Vercel/Render): `https://github.com/okubobarros/dalevision-edge-agent/releases/latest/download/DaleVisionEdgeSetup-latest.exe`.
 - Runbook: `docs/field-ops/release-runbook.md`.

@@ -73,12 +73,24 @@ jobs:
         run: |
           .\scripts\build_setup_installer.ps1 -Version $env:GITHUB_REF_NAME -SourceDir ".\release\win" -OutputDir "."
 
+      - name: Prepare stable release asset names
+        shell: pwsh
+        run: |
+          $setupAsset = Get-ChildItem -Path . -Filter "DaleVisionEdgeSetup-*.exe" | Select-Object -First 1
+          if ($null -eq $setupAsset) {
+            throw "Setup asset not found after installer build."
+          }
+          Copy-Item $setupAsset.FullName ".\DaleVisionEdgeSetup-latest.exe" -Force
+          Copy-Item ".\dalevision-edge-agent-windows.zip" ".\dalevision-edge-agent-windows-latest.zip" -Force
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dalevision-edge-agent-windows.zip
+            dalevision-edge-agent-windows-latest.zip
             DaleVisionEdgeSetup-*.exe
+            DaleVisionEdgeSetup-latest.exe
           name: ${{ github.ref_name }}
           generate_release_notes: true
 
