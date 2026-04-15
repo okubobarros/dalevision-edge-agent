@@ -47,6 +47,11 @@
 7. Usuario marca indicadores por camera (ex.: `flow`, `queue`, `occupancy`).
 8. Sistema confirma inicio da calibracao/diagnostico de 72h.
 
+Contrato de handoff web (obrigatorio):
+- A conclusao do LGPD deve redirecionar diretamente para `/app/dashboard?openEdgeSetup=1&store_id={store_id}`.
+- Nao deve haver retorno intermediario para `/onboarding` apos conclusao do wizard.
+- O modal de ativacao Edge deve abrir automaticamente ao chegar no dashboard.
+
 ## 5. Estados de ativacao (fonte de verdade)
 - `pending_download`: loja criada, aguardando download.
 - `pending_install`: setup baixado, aguardando primeiro contato do edge.
@@ -156,6 +161,8 @@ Compatibilidade:
   - Mitigar com fallback manual guiado + doctor.
 - **Exposicao de credencial**: token em nome de arquivo/log.
   - Mitigar com token efemero + politicas de sanitizacao.
+- **Loop de handoff LGPD -> dashboard (frontend)**: retorno indevido para onboarding e perda do modal de ativacao.
+  - Mitigar com contrato unico de redirecionamento e testes de nao-regressao no harness (10/10 execucoes sem rebound).
 
 ## 12. Definition of Done (DoD)
 - Usuario conclui instalacao sem terminal.
