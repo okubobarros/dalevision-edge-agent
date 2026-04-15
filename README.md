@@ -102,6 +102,11 @@ Notas:
 - `Diagnose.bat` gera um ZIP de diagnóstico para suporte.
 - Logs principais ficam em `logs\` no bundle (ou em `%PROGRAMDATA%\DaleVision\EdgeAgent\logs\` quando instalado).
 
+## Harness engineering (guides + sensors + memoria)
+- Estrutura: `docs/harness/`.
+- Gate local (rapido): `.\scripts\harness_check.ps1 -Quick`
+- Gate completo (com testes criticos): `.\scripts\harness_check.ps1`
+
 ## Release safety checks
 O script de release bloqueia qualquer pacote que contenha:
 - `tools/`, `outputs/`

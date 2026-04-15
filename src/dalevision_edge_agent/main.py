@@ -15,7 +15,7 @@ import sys
 import time
 import threading
 import traceback
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from .cameras import (
     AuthFailureTracker,
@@ -51,6 +51,11 @@ from .onboarding_readiness import (
     build_onboarding_readiness,
     export_onboarding_readiness_report,
 )
+from .onboarding_error_codes import (
+    map_camera_health_error_to_code,
+    map_heartbeat_failure_to_code,
+)
+from .onboarding_events import send_onboarding_event
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import build_onboarding_blueprint, run_discovery, run_scan
 from .setup_api import serve_setup_api
@@ -539,7 +544,54 @@ def _parse_int_env(name: str, default: int) -> int:
         raise ValueError(f"Invalid integer for {name}: {raw}") from exc
 
 
-def _start_setup_api_background(*, logger: logging.Logger) -> None:
+def _build_agent_capabilities() -> dict[str, Any]:
+    setup_api_enabled = _parse_bool_env("EDGE_SETUP_API_ENABLED", True)
+    vision_enabled = _parse_bool_env("VISION_ENABLED", False)
+    auto_update_enabled = _parse_bool_env("AUTO_UPDATE_ENABLED", True) or _parse_bool_env(
+        "ENABLE_AUTO_UPDATE",
+        False,
+    )
+    return {
+        "setup_api": setup_api_enabled,
+        "onboarding_blueprint": True,
+        "onboarding_readiness": True,
+        "onboarding_installation_check": True,
+        "camera_sync": _parse_bool_env("CAMERA_SYNC_ENABLED", True),
+        "vision_worker": vision_enabled,
+        "auto_update": auto_update_enabled,
+    }
+
+
+def _safe_emit_onboarding_event(
+    *,
+    logger: logging.Logger,
+    cloud_base_url: str,
+    edge_token: str,
+    event_name: str,
+    data: dict[str, Any],
+) -> None:
+    ok, status, error = send_onboarding_event(
+        cloud_base_url=cloud_base_url,
+        edge_token=edge_token,
+        event_name=event_name,
+        data=data,
+    )
+    if ok:
+        logger.info("[ONBOARDING] event=%s status=%s", event_name, status)
+    else:
+        logger.warning(
+            "[ONBOARDING] event=%s status=%s error=%s",
+            event_name,
+            status,
+            error,
+        )
+
+
+def _start_setup_api_background(
+    *,
+    logger: logging.Logger,
+    on_discovery_result: Optional[Callable[[list[dict[str, Any]], dict[str, Any]], None]] = None,
+) -> None:
     enabled = _parse_bool_env("EDGE_SETUP_API_ENABLED", True)
     if not enabled:
         logger.info("[SETUP_API] disabled by EDGE_SETUP_API_ENABLED=0")
@@ -559,6 +611,7 @@ def _start_setup_api_background(*, logger: logging.Logger) -> None:
                 host=host,
                 port=port,
                 discovery_provider=lambda: run_scan(logger=logger),
+                on_discovery_result=on_discovery_result,
                 logger=logger,
             )
         except OSError as exc:
@@ -933,6 +986,8 @@ def _run_camera_health_once(
     state_store: Optional[dict[str, dict[str, Any]]] = None,
     watchdog_state: Optional[dict[str, Any]] = None,
     watchdog_lock: Optional[threading.Lock] = None,
+    on_camera_validated: Optional[Callable[[dict[str, Any]], None]] = None,
+    on_camera_issue: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> int:
     posted = 0
     cycle_started_at = time.time()
@@ -976,6 +1031,28 @@ def _run_camera_health_once(
         )
         if ok_evt:
             posted += 1
+            if health.get("status") == "online" and callable(on_camera_validated):
+                try:
+                    on_camera_validated(
+                        {
+                            "camera_id": camera_id,
+                            "status": health.get("status"),
+                            "latency_ms": health.get("latency_ms"),
+                        }
+                    )
+                except Exception:
+                    logger.exception("[CAMERA_HEALTH] on_camera_validated callback failed")
+            elif health.get("status") != "online" and callable(on_camera_issue):
+                try:
+                    on_camera_issue(
+                        {
+                            "camera_id": camera_id,
+                            "status": health.get("status"),
+                            "error": health.get("error"),
+                        }
+                    )
+                except Exception:
+                    logger.exception("[CAMERA_HEALTH] on_camera_issue callback failed")
         if state_store is not None:
             state_store[camera_id] = {
                 "status": "online" if health.get("status") == "online" else "offline",
@@ -1009,6 +1086,8 @@ def _camera_health_loop(
     state_store: Optional[dict[str, dict[str, Any]]] = None,
     watchdog_state: Optional[dict[str, Any]] = None,
     watchdog_lock: Optional[threading.Lock] = None,
+    on_camera_validated: Optional[Callable[[dict[str, Any]], None]] = None,
+    on_camera_issue: Optional[Callable[[dict[str, Any]], None]] = None,
 ) -> None:
     while True:
         try:
@@ -1022,6 +1101,8 @@ def _camera_health_loop(
                 state_store=state_store,
                 watchdog_state=watchdog_state,
                 watchdog_lock=watchdog_lock,
+                on_camera_validated=on_camera_validated,
+                on_camera_issue=on_camera_issue,
             )
         except Exception as exc:
             logger.exception("[CAMERA_HEALTH] loop error: %s", exc)
@@ -1327,6 +1408,27 @@ def main() -> int:
             _rollback_update_if_needed(args.updated_from, logger)
         return 1
 
+    onboarding_ref = str(os.getenv("ONBOARDING_REF") or "").strip()
+    agent_capabilities = _build_agent_capabilities()
+    first_heartbeat_reported = False
+    activation_completed_reported = False
+    validated_camera_ids: set[str] = set()
+    discovery_fingerprints: set[str] = set()
+    activation_failed_fingerprints: set[str] = set()
+
+    _safe_emit_onboarding_event(
+        logger=logger,
+        cloud_base_url=settings.cloud_base_url,
+        edge_token=settings.edge_token,
+        event_name="onboarding_started",
+        data={
+            "store_id": settings.store_id,
+            "agent_id": settings.agent_id,
+            "onboarding_ref": onboarding_ref or None,
+            "agent_capabilities": agent_capabilities,
+        },
+    )
+
     print("DaleVision Agent iniciado")
     print("Conectando...")
     print("Loaded env OK")
@@ -1493,6 +1595,119 @@ def main() -> int:
         VISION_PROXY_DEFAULT_BUCKET_SECONDS,
     )
     last_vision_bucket_at = 0.0
+
+    def _emit_camera_validated(camera_payload: dict[str, Any]) -> None:
+        nonlocal activation_completed_reported
+        camera_id = str(camera_payload.get("camera_id") or "").strip()
+        if not camera_id:
+            return
+        if camera_id in validated_camera_ids:
+            return
+        validated_camera_ids.add(camera_id)
+        _safe_emit_onboarding_event(
+            logger=logger,
+            cloud_base_url=settings.cloud_base_url,
+            edge_token=settings.edge_token,
+            event_name="camera_validated",
+            data={
+                "store_id": settings.store_id,
+                "agent_id": settings.agent_id,
+                "camera_id": camera_id,
+                "status": camera_payload.get("status"),
+                "latency_ms": camera_payload.get("latency_ms"),
+                "onboarding_ref": onboarding_ref or None,
+            },
+        )
+        if not activation_completed_reported:
+            activation_completed_reported = True
+            _safe_emit_onboarding_event(
+                logger=logger,
+                cloud_base_url=settings.cloud_base_url,
+                edge_token=settings.edge_token,
+                event_name="activation_completed",
+                data={
+                    "store_id": settings.store_id,
+                    "agent_id": settings.agent_id,
+                    "first_camera_id": camera_id,
+                    "onboarding_ref": onboarding_ref or None,
+                },
+            )
+
+    def _emit_activation_failed_once(
+        *,
+        error_code: str,
+        scope: str,
+        extra_data: Optional[dict[str, Any]] = None,
+    ) -> None:
+        fingerprint = f"{str(error_code or '').strip()}::{str(scope or '').strip()}"
+        if fingerprint in activation_failed_fingerprints:
+            return
+        activation_failed_fingerprints.add(fingerprint)
+        base_data = {
+            "store_id": settings.store_id,
+            "agent_id": settings.agent_id,
+            "error_code": error_code,
+            "onboarding_ref": onboarding_ref or None,
+        }
+        if isinstance(extra_data, dict) and extra_data:
+            base_data.update(extra_data)
+        _safe_emit_onboarding_event(
+            logger=logger,
+            cloud_base_url=settings.cloud_base_url,
+            edge_token=settings.edge_token,
+            event_name="activation_failed",
+            data=base_data,
+        )
+
+    def _emit_camera_issue(camera_payload: dict[str, Any]) -> None:
+        camera_id = str(camera_payload.get("camera_id") or "").strip() or "unknown"
+        error_code = map_camera_health_error_to_code(str(camera_payload.get("error") or ""))
+        _emit_activation_failed_once(
+            error_code=error_code,
+            scope=f"camera:{camera_id}",
+            extra_data={
+                "camera_id": camera_id,
+                "camera_status": camera_payload.get("status"),
+            },
+        )
+
+    def _emit_discovery_summary(
+        scan_results: list[dict[str, Any]],
+        blueprint_payload: dict[str, Any],
+    ) -> None:
+        candidates = blueprint_payload.get("candidates") or []
+        ips = sorted(
+            {
+                str(item.get("ip") or "").strip()
+                for item in candidates
+                if str(item.get("ip") or "").strip()
+            }
+        )
+        fingerprint = "|".join(ips)
+        if fingerprint in discovery_fingerprints:
+            return
+        discovery_fingerprints.add(fingerprint)
+        _safe_emit_onboarding_event(
+            logger=logger,
+            cloud_base_url=settings.cloud_base_url,
+            edge_token=settings.edge_token,
+            event_name="camera_discovered",
+            data={
+                "store_id": settings.store_id,
+                "agent_id": settings.agent_id,
+                "candidate_count": len(candidates),
+                "recommended_count": len(
+                    blueprint_payload.get("selection_guidance", {}).get("recommended_camera_ips") or []
+                ),
+                "recommended_camera_ips": blueprint_payload.get("selection_guidance", {}).get(
+                    "recommended_camera_ips"
+                )
+                or [],
+                "scan_rows_count": len(scan_results or []),
+                "onboarding_ref": onboarding_ref or None,
+            },
+        )
+
     if args.smoke and args.smoke > 0:
         return _run_smoke(
             seconds=args.smoke,
@@ -1549,7 +1764,10 @@ def main() -> int:
             logger=logger,
         )
 
-    _start_setup_api_background(logger=logger)
+    _start_setup_api_background(
+        logger=logger,
+        on_discovery_result=_emit_discovery_summary,
+    )
 
     activation_runtime_config = ConfigManager.from_default().load()
     device_key, installed_version, update_channel = _resolve_device_identity(
@@ -1598,6 +1816,8 @@ def main() -> int:
                 "state_store": camera_states,
                 "watchdog_state": watchdog_state,
                 "watchdog_lock": watchdog_lock,
+                "on_camera_validated": _emit_camera_validated,
+                "on_camera_issue": _emit_camera_issue,
             },
             daemon=True,
         )
@@ -1622,6 +1842,8 @@ def main() -> int:
                 "state_store": camera_states,
                 "watchdog_state": watchdog_state,
                 "watchdog_lock": watchdog_lock,
+                "on_camera_validated": _emit_camera_validated,
+                "on_camera_issue": _emit_camera_issue,
             },
             daemon=True,
         )
@@ -1681,6 +1903,8 @@ def main() -> int:
                             "state_store": camera_states,
                             "watchdog_state": watchdog_state,
                             "watchdog_lock": watchdog_lock,
+                            "on_camera_validated": _emit_camera_validated,
+                            "on_camera_issue": _emit_camera_issue,
                         },
                         daemon=True,
                     )
@@ -1694,6 +1918,10 @@ def main() -> int:
                     print(message)
                     logger.error(message)
                     if camera_sync_fatal:
+                        _emit_activation_failed_once(
+                            error_code=map_heartbeat_failure_to_code(401),
+                            scope="camera_sync_auth",
+                        )
                         return EXIT_AUTH_ERROR
                     logger.warning("Camera sync fatal disabled (CAMERA_SYNC_FATAL=0).")
                     camera_auth_tracker.reset()
@@ -1827,6 +2055,10 @@ def main() -> int:
                             print(message)
                             logger.error(message)
                             if camera_sync_fatal:
+                                _emit_activation_failed_once(
+                                    error_code=map_heartbeat_failure_to_code(401),
+                                    scope="roi_auth",
+                                )
                                 return EXIT_AUTH_ERROR
                             logger.warning("Camera sync fatal disabled (CAMERA_SYNC_FATAL=0).")
                             camera_auth_tracker.reset()
@@ -1861,6 +2093,22 @@ def main() -> int:
                             with watchdog_lock:
                                 watchdog_state["last_camera_health_ok_at"] = time.time()
                                 watchdog_state["has_cameras"] = True
+                            if health.get("status") == "online":
+                                _emit_camera_validated(
+                                    {
+                                        "camera_id": camera_id,
+                                        "status": health.get("status"),
+                                        "latency_ms": health.get("latency_ms"),
+                                    }
+                                )
+                            else:
+                                _emit_camera_issue(
+                                    {
+                                        "camera_id": camera_id,
+                                        "status": health.get("status"),
+                                        "error": health.get("error"),
+                                    }
+                                )
                         if camera_auth_tracker.consecutive >= MAX_CONSECUTIVE_AUTH_FAILURES:
                             message = (
                                 f"ERRO FATAL: {MAX_CONSECUTIVE_AUTH_FAILURES} falhas de "
@@ -1869,6 +2117,10 @@ def main() -> int:
                             print(message)
                             logger.error(message)
                             if camera_sync_fatal:
+                                _emit_activation_failed_once(
+                                    error_code=map_heartbeat_failure_to_code(401),
+                                    scope="camera_event_auth",
+                                )
                                 return EXIT_AUTH_ERROR
                             logger.warning("Camera sync fatal disabled (CAMERA_SYNC_FATAL=0).")
                             camera_auth_tracker.reset()
@@ -1905,7 +2157,11 @@ def main() -> int:
             agent_id=settings.agent_id,
             version=version,
             payload=heartbeat_payload,
-            extra_data=camera_fields,
+            extra_data={
+                **camera_fields,
+                "onboarding_ref": onboarding_ref or None,
+                "agent_capabilities": agent_capabilities,
+            },
         )
 
         with watchdog_lock:
@@ -1933,6 +2189,20 @@ def main() -> int:
 
         if ok:
             logger.info("Heartbeat -> %s status=%s", url, status)
+            if not first_heartbeat_reported:
+                first_heartbeat_reported = True
+                _safe_emit_onboarding_event(
+                    logger=logger,
+                    cloud_base_url=settings.cloud_base_url,
+                    edge_token=settings.edge_token,
+                    event_name="agent_first_heartbeat",
+                    data={
+                        "store_id": settings.store_id,
+                        "agent_id": settings.agent_id,
+                        "heartbeat_status": status,
+                        "onboarding_ref": onboarding_ref or None,
+                    },
+                )
             backoff_index = 0
             consecutive_auth_failures = 0
             now = time.time()
@@ -2189,6 +2459,10 @@ def main() -> int:
                 )
                 print(message)
                 logger.error(message)
+                _emit_activation_failed_once(
+                    error_code=map_heartbeat_failure_to_code(status),
+                    scope="heartbeat_auth",
+                )
                 return EXIT_AUTH_ERROR
         elif status is not None and status < 500:
             consecutive_auth_failures = 0

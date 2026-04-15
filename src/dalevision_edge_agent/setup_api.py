@@ -16,12 +16,14 @@ from .streaming import stream_manager
 
 
 DiscoveryProvider = Callable[[], list[dict[str, Any]]]
+DiscoveryTelemetryHook = Callable[[list[dict[str, Any]], dict[str, Any]], None]
 
 
 def build_setup_api_response(
     *,
     path: str,
     discovery_provider: DiscoveryProvider,
+    on_discovery_result: Optional[DiscoveryTelemetryHook] = None,
 ) -> tuple[int, dict[str, Any]]:
     parsed = urlparse(path)
     route = parsed.path.rstrip("/") or "/"
@@ -59,6 +61,12 @@ def build_setup_api_response(
         plan_code = (query.get("plan") or ["trial"])[0]
         scan_results = discovery_provider()
         payload = build_onboarding_blueprint(scan_results, plan_code=plan_code)
+        if callable(on_discovery_result):
+            try:
+                on_discovery_result(scan_results, payload)
+            except Exception:
+                # Discovery telemetry must never break onboarding API.
+                pass
         return 200, {
             "ok": True,
             **payload,
@@ -135,6 +143,7 @@ def serve_setup_api(
     host: str,
     port: int,
     discovery_provider: DiscoveryProvider,
+    on_discovery_result: Optional[DiscoveryTelemetryHook] = None,
     logger: Optional[logging.Logger] = None,
 ) -> None:
     # O host padrão de escuta deve ser 0.0.0.0 para garantir acessibilidade loopback no Windows.
@@ -208,6 +217,7 @@ def serve_setup_api(
             code, payload = build_setup_api_response(
                 path=self.path,
                 discovery_provider=discovery_provider,
+                on_discovery_result=on_discovery_result,
             )
             self._write_json(code, payload)
 

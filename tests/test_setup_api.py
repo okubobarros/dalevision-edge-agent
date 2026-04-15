@@ -34,6 +34,28 @@ def test_setup_api_blueprint_response_uses_plan_and_scan_results():
     ]
 
 
+def test_setup_api_blueprint_invokes_discovery_hook_once():
+    captured: dict = {}
+
+    def fake_discovery():
+        return [{"ip": "192.168.0.10", "ports": [554], "confidence": "high"}]
+
+    def hook(scan_results, payload):
+        captured["count"] = len(scan_results)
+        captured["plan"] = payload.get("plan_code")
+        captured["candidates"] = len(payload.get("candidates") or [])
+
+    code, payload = build_setup_api_response(
+        path="/onboarding/blueprint?plan=trial",
+        discovery_provider=fake_discovery,
+        on_discovery_result=hook,
+    )
+
+    assert code == 200
+    assert payload["ok"] is True
+    assert captured == {"count": 1, "plan": "trial", "candidates": 1}
+
+
 def test_setup_api_not_found_response():
     code, payload = build_setup_api_response(
         path="/unknown",
