@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -218,9 +219,11 @@ def sync_release_record(
                 )
                 inserted = False
             else:
+                generated_id = str(uuid.uuid4())
                 cur.execute(
                     """
                     INSERT INTO edge_releases (
+                        id,
                         channel,
                         current_version,
                         minimum_supported_version,
@@ -232,10 +235,11 @@ def sync_release_record(
                         created_at,
                         updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, TRUE, %s, %s, NOW(), NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, TRUE, %s, %s, NOW(), NOW())
                     RETURNING id::text
                     """,
                     (
+                        generated_id,
                         record.channel,
                         record.version,
                         resolved_min_supported,
