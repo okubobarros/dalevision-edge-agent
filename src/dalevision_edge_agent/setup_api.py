@@ -5,6 +5,7 @@ import time
 import json
 import logging
 import socket
+import importlib.metadata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
@@ -17,6 +18,13 @@ from .streaming import stream_manager
 
 DiscoveryProvider = Callable[[], list[dict[str, Any]]]
 DiscoveryTelemetryHook = Callable[[list[dict[str, Any]], dict[str, Any]], None]
+
+
+def _resolve_agent_version() -> str:
+    try:
+        return importlib.metadata.version("dalevision-edge-agent")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
 
 
 def build_setup_api_response(
@@ -47,7 +55,7 @@ def build_setup_api_response(
             "ok": True,
             "service": "edge_setup_api",
             "status": "online",
-            "version": "1.0.22",
+            "version": _resolve_agent_version(),
             "ips": get_local_ips(),
             "capabilities": {
                 "onboarding_blueprint": True,
