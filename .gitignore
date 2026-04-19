@@ -213,6 +213,8 @@ docs/sequential_thinking_prompt.md
 # Edge release artifacts
 release/win/
 dalevision-edge-agent-windows.zip
+DaleVisionEdgeSetup-latest.exe
+DaleVisionEdgeSetup-v*.exe
 
 # Local dev videos/outputs
 videos/
