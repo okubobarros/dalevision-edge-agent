@@ -294,7 +294,7 @@ if (-not [string]::IsNullOrWhiteSpace($tokenResolved) -and -not [string]::IsNull
       update_channel = "stable"
     } | ConvertTo-Json
     $activateUrl = ($CloudBaseUrl.TrimEnd("/") + "/api/v1/stores/activate/")
-    $activateResp = Invoke-RestMethod -Method Post -Uri $activateUrl -ContentType "application/json" -Body $activationBody -TimeoutSec 20
+    $activateResp = Invoke-RestMethod -Method Post -Uri $activateUrl -ContentType "application/json" -Body $activationBody -TimeoutSec 60
     if ($activateResp -and $activateResp.ok -eq $true) {
       $storeId = [string]$activateResp.store_id
       $edgeToken = [string]$activateResp.edge_token
@@ -318,7 +318,20 @@ if (-not [string]::IsNullOrWhiteSpace($tokenResolved) -and -not [string]::IsNull
       Write-Log "INSTALL004D activation_bootstrap_response_not_ok"
     }
   } catch {
-    Write-Log ("INSTALL004E activation_bootstrap_failed err={0}" -f $_.Exception.Message)
+    $detail = ""
+    try {
+      if ($_.Exception.Response -and $_.Exception.Response.GetResponseStream()) {
+        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+        $detail = $reader.ReadToEnd()
+      }
+    } catch {
+      $detail = ""
+    }
+    if (-not [string]::IsNullOrWhiteSpace($detail)) {
+      Write-Log ("INSTALL004E activation_bootstrap_failed err={0} detail={1}" -f $_.Exception.Message, $detail)
+    } else {
+      Write-Log ("INSTALL004E activation_bootstrap_failed err={0}" -f $_.Exception.Message)
+    }
   }
 }
 
