@@ -25,6 +25,7 @@ ROI_ENDPOINTS = (
 )
 HEALTH_ENDPOINT = "/api/v1/cameras/{camera_id}/health/"
 EDGE_EVENTS_ENDPOINT = "/api/edge/events/"
+SNAPSHOT_UPLOAD_ENDPOINT = "/api/edge/cameras/{camera_id}/snapshot/"
 
 HTTP_TIMEOUT_SECONDS = 5
 HEALTHCHECK_TIMEOUT_SECONDS = 3
@@ -782,6 +783,75 @@ def capture_snapshot_if_possible(
         return {"snapshot_status": "ok", "snapshot_local_path": str(output_path)}
     finally:
         cap.release()
+
+
+def upload_snapshot_to_cloud(
+    *,
+    cloud_base_url: str,
+    edge_token: str,
+    camera_id: str,
+    snapshot_local_path: str,
+    logger: Optional[logging.Logger] = None,
+) -> tuple[Optional[str], Optional[int], Optional[str]]:
+    base_url = _normalize_base_url(cloud_base_url)
+    path = str(snapshot_local_path or "").strip()
+    if not base_url or not edge_token or not camera_id or not path:
+        return None, None, "missing_required_fields"
+
+    snapshot_file = Path(path)
+    if not snapshot_file.exists():
+        return None, None, "snapshot_file_missing"
+
+    endpoint = f"{base_url}{SNAPSHOT_UPLOAD_ENDPOINT.format(camera_id=camera_id)}"
+    timeout_seconds = _resolve_timeout_seconds(10, "EDGE_SNAPSHOT_UPLOAD_TIMEOUT_SECONDS")
+    headers = build_auth_headers(edge_token)
+    # Multipart request must not force JSON content type.
+    headers.pop("Content-Type", None)
+
+    try:
+        with snapshot_file.open("rb") as fh:
+            files = {"snapshot": (snapshot_file.name, fh, "image/jpeg")}
+            response = requests.post(endpoint, headers=headers, files=files, timeout=timeout_seconds)
+    except requests.RequestException as exc:
+        if logger:
+            logger.warning(
+                "[SNAPSHOT] upload network error camera_id=%s path=%s error=%s",
+                camera_id,
+                path,
+                exc,
+            )
+        return None, None, str(exc)
+
+    status = response.status_code
+    payload: dict[str, Any] = {}
+    try:
+        payload = response.json() if response.content else {}
+    except Exception:
+        payload = {}
+
+    if 200 <= status < 300:
+        snapshot_url = str(payload.get("snapshot_url") or "").strip() or None
+        if logger:
+            logger.info(
+                "[SNAPSHOT] upload ok camera_id=%s status=%s has_url=%s",
+                camera_id,
+                status,
+                bool(snapshot_url),
+            )
+        return snapshot_url, status, None
+
+    detail = (
+        str(payload.get("detail") or payload.get("error") or payload.get("message") or "").strip()
+        or f"http_{status}"
+    )
+    if logger:
+        logger.warning(
+            "[SNAPSHOT] upload failed camera_id=%s status=%s detail=%s",
+            camera_id,
+            status,
+            detail,
+        )
+    return None, status, detail
 
 
 def _capture_snapshot_ffmpeg(

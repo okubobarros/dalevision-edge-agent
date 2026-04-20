@@ -31,6 +31,7 @@ from .cameras import (
     mask_rtsp_url,
     send_camera_health_event,
     send_vision_metrics_event,
+    upload_snapshot_to_cloud,
 )
 from .activation import (
     AgentState,
@@ -2009,18 +2010,33 @@ def main() -> int:
                             )
                             if snapshot_result.get("snapshot_local_path"):
                                 health["snapshot_taken"] = True
-                                health["snapshot_url"] = snapshot_result.get(
-                                    "snapshot_local_path"
-                                )
+                                health["snapshot_url"] = snapshot_result.get("snapshot_local_path")
                                 health.update(
                                     estimate_snapshot_quality(
                                         snapshot_result.get("snapshot_local_path"),
                                         logger=logger,
                                     )
                                 )
+                                uploaded_snapshot_url, upload_status, upload_error = upload_snapshot_to_cloud(
+                                    cloud_base_url=settings.cloud_base_url,
+                                    edge_token=settings.edge_token,
+                                    camera_id=camera_id,
+                                    snapshot_local_path=str(snapshot_result.get("snapshot_local_path") or ""),
+                                    logger=logger,
+                                )
+                                if uploaded_snapshot_url:
+                                    health["snapshot_url"] = uploaded_snapshot_url
+                                    health["snapshot_upload_status"] = "ok"
+                                else:
+                                    health["snapshot_upload_status"] = "failed"
+                                    if upload_status is not None:
+                                        health["snapshot_upload_http_status"] = upload_status
+                                    if upload_error:
+                                        health["snapshot_upload_error"] = upload_error
                                 logger.info(
-                                    "camera_id=%s snapshot ready (upload pending)",
+                                    "camera_id=%s snapshot ready upload_status=%s",
                                     camera_id,
+                                    health.get("snapshot_upload_status") or "unknown",
                                 )
                             else:
                                 health["snapshot_taken"] = False
