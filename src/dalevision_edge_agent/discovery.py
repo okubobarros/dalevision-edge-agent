@@ -53,6 +53,22 @@ def discover_onvif_cameras(timeout: int = 2) -> List[dict[str, Any]]:
                     logger.info(f"Câmera ONVIF detectada em: {ip}")
                     seen_ips.add(ip)
                     
+                    # Extração rudimentar de informações dos Scopes do ONVIF
+                    # Scopes geralmente contêm strings como 'onvif://www.onvif.org/name/Camera_Entrance'
+                    name_hint = ""
+                    if "<Scopes>" in response:
+                        try:
+                            scopes_content = response.split("<Scopes>")[1].split("</Scopes>")[0]
+                            for scope in scopes_content.split():
+                                if "/name/" in scope:
+                                    name_hint = scope.split("/name/")[1].replace("_", " ").strip()
+                                    break
+                                if "/location/" in scope:
+                                    name_hint = scope.split("/location/")[1].replace("_", " ").strip()
+                                    break
+                        except:
+                            pass
+
                     # Sugestões de RTSP baseadas no IP e marcas comuns (Hikvision, Intelbras, Dahua)
                     paths = [
                         "/cam/realmonitor?channel=1&subtype=0", # Intelbras/Dahua
@@ -63,7 +79,9 @@ def discover_onvif_cameras(timeout: int = 2) -> List[dict[str, Any]]:
                     
                     cam_results.append({
                         "ip": ip,
+                        "name": name_hint or f"Câmera {ip.split('.')[-1]}",
                         "brand_hint": "Intelbras/Hikvision/Dahua" if "XAddrs" in response else "Generic",
+                        "model": "ONVIF Camera",
                         "ports": [80, 554, 8000, 8999], 
                         "rtsp_suggestions": [f"rtsp://admin:admin@{ip}{p}" for p in paths],
                         "confidence": "high",

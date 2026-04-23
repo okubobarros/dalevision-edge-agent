@@ -68,6 +68,43 @@ class StreamManager:
             logger.error(f"Failed to start FFmpeg for {camera_id}: {e}")
             return False
 
+    def get_snapshot(self, camera_id: str, rtsp_url: str) -> Optional[str]:
+        """
+        Gera um snapshot JPEG único para identificação visual rápida.
+        Retorna o caminho do arquivo gerado.
+        """
+        output_path = os.path.join(self.streams_dir, f"snap_{camera_id}.jpg")
+        
+        # FFmpeg command for single frame capture
+        # -frames:v 1: Capture 1 frame
+        # -q:v 2: High quality JPEG
+        cmd = [
+            "ffmpeg",
+            "-rtsp_transport", "tcp",
+            "-i", rtsp_url,
+            "-frames:v", "1",
+            "-q:v", "2",
+            "-y", # Overwrite
+            output_path
+        ]
+
+        try:
+            logger.info(f"Generating snapshot for {camera_id}...")
+            subprocess.run(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            if os.path.exists(output_path):
+                return output_path
+        except Exception as e:
+            logger.error(f"Failed to generate snapshot for {camera_id}: {e}")
+        
+        return None
+
     def stop_hls(self, camera_id: str):
         if camera_id in self.processes:
             process = self.processes[camera_id]

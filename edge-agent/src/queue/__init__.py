@@ -1,1 +1,0 @@
-"""Local persistent queue (sqlite)."""

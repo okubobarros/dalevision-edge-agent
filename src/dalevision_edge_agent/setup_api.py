@@ -128,6 +128,22 @@ def build_setup_api_response(
         )
         return 200, result
 
+    if route == "/onboarding/snapshot":
+        ip = (query.get("ip") or [""])[0]
+        user = (query.get("user") or ["admin"])[0]
+        password = (query.get("password") or ["admin"])[0]
+        channel = int((query.get("channel") or ["1"])[0])
+        cam_id = ip.replace(".", "_")
+        
+        # Tenta gerar o RTSP URL (simplificado para o snapshot de descoberta)
+        rtsp_url = f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=0"
+        
+        snap_path = stream_manager.get_snapshot(cam_id, rtsp_url)
+        if snap_path and os.path.exists(snap_path):
+            return 200, {"ok": True, "serving_file": True, "file_path": snap_path}
+        
+        return 500, {"ok": False, "error": "failed_to_capture"}
+
     # --- Streaming (Phase 1) ---
     if route.startswith("/stream/"):
         # Serve static stream files from a temp folder or the worker's shared state
@@ -136,6 +152,8 @@ def build_setup_api_response(
             content_type = "application/vnd.apple.mpegurl"
         elif route.endswith(".ts"):
             content_type = "video/MP2T"
+        elif route.endswith(".jpg"):
+            content_type = "image/jpeg"
         
         # This will be handled by the Handler if we allow file access
         return 200, {"ok": True, "serving_file": True}
