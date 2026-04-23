@@ -245,6 +245,18 @@ def serve_setup_api(
                 discovery_provider=discovery_provider,
                 on_discovery_result=on_discovery_result,
             )
+            
+            if payload.get("serving_file") and payload.get("file_path") and os.path.exists(payload["file_path"]):
+                with open(payload["file_path"], "rb") as f:
+                    data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(data)))
+                    self._set_cors_headers()
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
+            
             self._write_json(code, payload)
 
         def log_message(self, _format: str, *_args: Any) -> None:
