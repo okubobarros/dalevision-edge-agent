@@ -21,10 +21,8 @@ DiscoveryTelemetryHook = Callable[[list[dict[str, Any]], dict[str, Any]], None]
 
 
 def _resolve_agent_version() -> str:
-    try:
-        return importlib.metadata.version("dalevision-edge-agent")
-    except importlib.metadata.PackageNotFoundError:
-        return "unknown"
+    # Forçado para 1.0.35 para garantir sincronia com o Setup atual
+    return "1.0.35"
 
 
 def build_setup_api_response(
