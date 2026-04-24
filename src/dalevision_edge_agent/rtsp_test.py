@@ -13,8 +13,12 @@ from .diagnostics import _parse_ipconfig, _run_cmd
 
 
 def _build_intelbras_rtsp(ip: str, user: str, password: str, channel: int, subtype: int) -> str:
+    host = ip
+    port = "554"
+    if ":" in ip:
+        host, port = ip.rsplit(":", 1)
     return (
-        f"rtsp://{user}:{password}@{ip}:554/"
+        f"rtsp://{user}:{password}@{host}:{port}/"
         f"cam/realmonitor?channel={channel}&subtype={subtype}"
     )
 
@@ -85,8 +89,9 @@ def test_rtsp(
             "health": health,
         }
 
+    safe_ip_for_path = ip.replace(":", "_")
     snapshot = capture_snapshot_if_possible(
-        camera_id=f"nvr-{ip}-ch{channel}",
+        camera_id=f"nvr-{safe_ip_for_path}-ch{channel}",
         rtsp_url=rtsp_url,
         logger=logger,
         timeout_seconds=timeout_seconds,
