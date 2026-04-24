@@ -143,11 +143,11 @@ def build_setup_api_response(
                 print(f"[SETUP_API] Snapshot OK: {snap_path}")
                 return 200, {"ok": True, "serving_file": True, "file_path": snap_path}
             
-            print(f"[SETUP_API] Erro: stream_manager não retornou arquivo para {ip}")
-            return 500, {"ok": False, "error": "capture_failed", "detail": "stream_manager_empty"}
+            print(f"[SETUP_API] Aviso: capture_failed para {ip}")
+            return 200, {"ok": False, "error": "capture_failed", "detail": "stream_manager_empty"}
         except Exception as e:
             print(f"[SETUP_API] Exceção no snapshot: {str(e)}")
-            return 500, {"ok": False, "error": "exception", "detail": str(e)}
+            return 200, {"ok": False, "error": "exception", "detail": str(e)}
 
     # --- Streaming (Phase 1) ---
     if route.startswith("/stream/"):
