@@ -131,7 +131,7 @@ def build_setup_api_response(
         user = (query.get("user") or ["admin"])[0]
         password = (query.get("password") or ["admin"])[0]
         channel = int((query.get("channel") or ["1"])[0])
-        cam_id = ip.replace(".", "_")
+        cam_id = f"{ip.replace('.', '_')}_ch{channel}"
         
         # Subtype 1 (Extra Stream) é muito mais rápido e confiável para snapshots de NVR
         rtsp_url = f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=1"
