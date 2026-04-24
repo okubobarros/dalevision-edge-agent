@@ -290,7 +290,6 @@ function Invoke-InstallService {
     [switch]$EnableStartupTask,
     [switch]$WhatIf
   )
-
   $installRoot = Resolve-InstallRoot -InstallDir $InstallDir -ScriptRoot $PSScriptRoot
 
   $logDir = Join-Path $installRoot "logs"
@@ -309,6 +308,24 @@ function Invoke-InstallService {
       Write-Log "SELF_SHA256=ERROR $($_.Exception.Message)"
     }
   }
+
+  # --- LIMPEZA DE VERSOES ANTERIORES (EVITA AGENTE FANTASMA) ---
+  Write-Log "LIMPANDO: Parando qualquer versao anterior do agente para evitar conflitos de porta/token..."
+  try {
+    $stopScript = Join-Path $installRoot "scripts\stop-agent.ps1"
+    if (Test-Path $stopScript) {
+      & $stopScript -InstallDir $installRoot | Out-Null
+      Write-Log "LIMPEZA: stop-agent.ps1 executado."
+    }
+    # Força a morte de processos teimosos
+    taskkill /F /IM python.exe /T 2>$null | Out-Null
+    taskkill /F /IM DaleVisionEdgeAgent.exe /T 2>$null | Out-Null
+    taskkill /F /IM "DaleVision Edge Agent.exe" /T 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+  } catch {
+    Write-Log "LIMPEZA: Ignorado ou falha silenciosa."
+  }
+  # ----------------------------------------------------------
 
   try {
     $currentUser = Get-CurrentUserId
@@ -342,7 +359,6 @@ function Invoke-InstallService {
     # Executa oculto via PowerShell e grava logs em logs\agent.log.
     $launcherPath = Resolve-AgentTaskLauncherPath -InstallRoot $installRoot -AgentExePath $agentExe
     $taskCmd = Get-AgentTaskCommand -LauncherPath $launcherPath
-
     $psExePath = Join-Path $env:WINDIR "System32\\WindowsPowerShell\\v1.0\\powershell.exe"
     Write-Log "EXISTS_psExe=$(Test-Path $psExePath)"
     $startPs1Check = Join-Path $installRoot "scripts\\internal\\Start_DaleVision_Agent.ps1"
