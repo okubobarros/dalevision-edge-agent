@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import json
 import logging
@@ -18,6 +19,12 @@ from .streaming import stream_manager
 
 DiscoveryProvider = Callable[[], list[dict[str, Any]]]
 DiscoveryTelemetryHook = Callable[[list[dict[str, Any]], dict[str, Any]], None]
+
+
+def _redact_sensitive_text(value: str) -> str:
+    text = str(value or "")
+    # Avoid leaking camera credentials when lower-level libraries include RTSP URLs in errors.
+    return re.sub(r"(rtsp://[^:/\s]+:)[^@\s]+@", r"\1***@", text)
 
 
 def _resolve_agent_version() -> str:
@@ -146,8 +153,9 @@ def build_setup_api_response(
             print(f"[SETUP_API] Aviso: capture_failed para {ip}")
             return 200, {"ok": False, "error": "capture_failed", "detail": "stream_manager_empty"}
         except Exception as e:
-            print(f"[SETUP_API] Exceção no snapshot: {str(e)}")
-            return 200, {"ok": False, "error": "exception", "detail": str(e)}
+            detail = _redact_sensitive_text(str(e))
+            print(f"[SETUP_API] Exceção no snapshot: {detail}")
+            return 200, {"ok": False, "error": "exception", "detail": detail}
 
     # --- Streaming (Phase 1) ---
     if route.startswith("/stream/"):

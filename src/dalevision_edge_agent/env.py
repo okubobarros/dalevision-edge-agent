@@ -237,13 +237,9 @@ def load_settings() -> Settings:
     if _looks_like_placeholder(token):
         raise InvalidTokenError("EDGE_TOKEN inválido. Cole o token real do Wizard.")
     values["EDGE_TOKEN"] = token
-    prefix = token[:6]
-    suffix = token[-4:] if len(token) >= 4 else token
     logger.info(
-        "EDGE_TOKEN(len)=%s prefix=%s... suffix=...%s",
+        "EDGE_TOKEN carregado (len=%s).",
         len(token),
-        prefix,
-        suffix,
     )
 
     if not token:

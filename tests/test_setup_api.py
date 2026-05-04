@@ -1,4 +1,5 @@
 from dalevision_edge_agent.setup_api import build_setup_api_response
+from dalevision_edge_agent.setup_api import _redact_sensitive_text
 
 
 def test_setup_api_health_response():
@@ -64,6 +65,14 @@ def test_setup_api_not_found_response():
     assert code == 404
     assert payload["ok"] is False
     assert payload["error"] == "not_found"
+
+
+def test_setup_api_redacts_rtsp_passwords_from_errors():
+    text = "failed opening rtsp://admin:secret@192.168.1.10:554/live"
+    redacted = _redact_sensitive_text(text)
+
+    assert "secret" not in redacted
+    assert "rtsp://admin:***@192.168.1.10:554/live" in redacted
 
 
 def test_setup_api_readiness_response_uses_readiness_builder(monkeypatch):
