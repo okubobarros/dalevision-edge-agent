@@ -166,12 +166,14 @@ def build_setup_api_response(
         channel = int((query.get("channel") or ["1"])[0])
         cam_id = f"{ip.replace('.', '_')}_ch{channel}"
         
-        # Subtype 1 (Extra Stream) é muito mais rápido e confiável para snapshots de NVR
-        rtsp_url = f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=1"
+        rtsp_urls = [
+            f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=1",
+            f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=0",
+        ]
         
         print(f"[SETUP_API] Tentando snapshot: {ip} (CH {channel})")
         try:
-            snap_path = stream_manager.get_snapshot(cam_id, rtsp_url)
+            snap_path = stream_manager.get_snapshot_with_fallbacks(cam_id, rtsp_urls)
             if snap_path and os.path.exists(snap_path):
                 print(f"[SETUP_API] Snapshot OK: {snap_path}")
                 return 200, {"ok": True, "serving_file": True, "file_path": snap_path}

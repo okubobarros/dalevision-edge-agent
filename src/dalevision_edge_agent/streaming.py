@@ -80,11 +80,13 @@ class StreamManager:
         # -q:v 2: High quality JPEG
         cmd = [
             "ffmpeg",
+            "-y",
             "-rtsp_transport", "tcp",
+            "-stimeout", "5000000",
             "-i", rtsp_url,
+            "-an",
             "-frames:v", "1",
             "-q:v", "2",
-            "-y", # Overwrite
             output_path
         ]
 
@@ -103,6 +105,13 @@ class StreamManager:
         except Exception as e:
             logger.error(f"Failed to generate snapshot for {camera_id}: {e}")
         
+        return None
+
+    def get_snapshot_with_fallbacks(self, camera_id: str, rtsp_urls: list[str]) -> Optional[str]:
+        for index, rtsp_url in enumerate(rtsp_urls):
+            path = self.get_snapshot(f"{camera_id}_{index}", rtsp_url)
+            if path:
+                return path
         return None
 
     def stop_hls(self, camera_id: str):
