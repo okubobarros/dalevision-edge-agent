@@ -1,3 +1,5 @@
+import json
+
 from dalevision_edge_agent.setup_api import build_setup_api_response
 from dalevision_edge_agent.setup_api import _redact_sensitive_text
 
@@ -11,6 +13,42 @@ def test_setup_api_health_response():
     assert payload["ok"] is True
     assert payload["service"] == "edge_setup_api"
     assert payload["capabilities"]["onboarding_installation_check"] is True
+
+
+def test_setup_api_health_uses_installed_version_from_config(monkeypatch, tmp_path):
+    config_path = tmp_path / "agent_config.json"
+    expected_version = "latest-test-version"
+    config_path.write_text(
+        json.dumps({"installed_version": expected_version}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DALE_AGENT_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("DALEVISION_EDGE_AGENT_VERSION", raising=False)
+    monkeypatch.delenv("EDGE_AGENT_VERSION", raising=False)
+
+    code, payload = build_setup_api_response(
+        path="/health",
+        discovery_provider=lambda: [],
+    )
+
+    assert code == 200
+    assert payload["version"] == expected_version
+
+
+def test_setup_api_health_falls_back_to_launcher_version(monkeypatch, tmp_path):
+    config_path = tmp_path / "missing_agent_config.json"
+    expected_version = "launcher-dynamic-version"
+    monkeypatch.setenv("DALE_AGENT_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("DALEVISION_EDGE_AGENT_VERSION", expected_version)
+    monkeypatch.delenv("EDGE_AGENT_VERSION", raising=False)
+
+    code, payload = build_setup_api_response(
+        path="/health",
+        discovery_provider=lambda: [],
+    )
+
+    assert code == 200
+    assert payload["version"] == expected_version
 
 
 def test_setup_api_blueprint_response_uses_plan_and_scan_results():

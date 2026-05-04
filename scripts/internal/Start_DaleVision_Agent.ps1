@@ -75,6 +75,7 @@ try {
 }
 $versionSafe = ($version -replace '[^A-Za-z0-9._-]', '-')
 if ([string]::IsNullOrWhiteSpace($versionSafe)) { $versionSafe = "unknown" }
+$env:DALEVISION_EDGE_AGENT_VERSION = $versionSafe
 $runtimeRoot = Join-Path $cacheDirSafe "runtime\$versionSafe"
 $tmpDir = Join-Path $runtimeRoot ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString())
 if (-not (Test-Path $tmpDir)) {

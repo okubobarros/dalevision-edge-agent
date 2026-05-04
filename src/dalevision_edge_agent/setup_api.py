@@ -7,10 +7,12 @@ import json
 import logging
 import socket
 import importlib.metadata
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .activation import ConfigManager
 from .installation_check import build_installation_check_payload
 from .onboarding_readiness import build_onboarding_readiness
 from .scan import build_onboarding_blueprint
@@ -28,8 +30,32 @@ def _redact_sensitive_text(value: str) -> str:
 
 
 def _resolve_agent_version() -> str:
-    # Forçado para 1.0.35 para garantir sincronia com o Setup atual
-    return "1.0.35"
+    installed_version = str(ConfigManager.from_default().load().get("installed_version") or "").strip()
+    if installed_version:
+        return installed_version
+
+    env_version = str(
+        os.getenv("DALEVISION_EDGE_AGENT_VERSION")
+        or os.getenv("EDGE_AGENT_VERSION")
+        or ""
+    ).strip()
+    if env_version:
+        return env_version
+
+    app_dir = str(os.getenv("DALE_APP_DIR") or "").strip()
+    if app_dir:
+        try:
+            version_file = Path(app_dir) / "VERSION"
+            version_value = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
+            if version_value:
+                return version_value
+        except Exception:
+            pass
+
+    try:
+        return importlib.metadata.version("dalevision-edge-agent")
+    except Exception:
+        return "unknown"
 
 
 def build_setup_api_response(
