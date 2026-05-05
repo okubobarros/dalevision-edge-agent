@@ -29,10 +29,32 @@ def _redact_sensitive_text(value: str) -> str:
     return re.sub(r"(rtsp://[^:/\s]+:)[^@\s]+@", r"\1***@", text)
 
 
+def _looks_like_version(value: str) -> bool:
+    return bool(re.fullmatch(r"v?\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9._-]+)?", str(value or "").strip()))
+
+
+def _version_from_path(path: Path) -> str:
+    for candidate in (path, Path.cwd()):
+        name = candidate.name.strip()
+        if _looks_like_version(name):
+            return name.lstrip("v")
+    return ""
+
+
 def _resolve_agent_version() -> str:
-    installed_version = str(ConfigManager.from_default().load().get("installed_version") or "").strip()
-    if installed_version:
-        return installed_version
+    app_dir = str(os.getenv("DALE_APP_DIR") or "").strip()
+    if app_dir:
+        app_dir_path = Path(app_dir)
+        path_version = _version_from_path(app_dir_path)
+        if path_version:
+            return path_version
+        try:
+            version_file = app_dir_path / "VERSION"
+            version_value = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
+            if version_value:
+                return version_value
+        except Exception:
+            pass
 
     env_version = str(
         os.getenv("DALEVISION_EDGE_AGENT_VERSION")
@@ -42,15 +64,9 @@ def _resolve_agent_version() -> str:
     if env_version:
         return env_version
 
-    app_dir = str(os.getenv("DALE_APP_DIR") or "").strip()
-    if app_dir:
-        try:
-            version_file = Path(app_dir) / "VERSION"
-            version_value = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
-            if version_value:
-                return version_value
-        except Exception:
-            pass
+    installed_version = str(ConfigManager.from_default().load().get("installed_version") or "").strip()
+    if installed_version:
+        return installed_version
 
     try:
         return importlib.metadata.version("dalevision-edge-agent")

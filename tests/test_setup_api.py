@@ -39,6 +39,7 @@ def test_setup_api_health_falls_back_to_launcher_version(monkeypatch, tmp_path):
     config_path = tmp_path / "missing_agent_config.json"
     expected_version = "launcher-dynamic-version"
     monkeypatch.setenv("DALE_AGENT_CONFIG_PATH", str(config_path))
+    monkeypatch.delenv("DALE_APP_DIR", raising=False)
     monkeypatch.setenv("DALEVISION_EDGE_AGENT_VERSION", expected_version)
     monkeypatch.delenv("EDGE_AGENT_VERSION", raising=False)
 
@@ -49,6 +50,25 @@ def test_setup_api_health_falls_back_to_launcher_version(monkeypatch, tmp_path):
 
     assert code == 200
     assert payload["version"] == expected_version
+
+
+def test_setup_api_health_prefers_versioned_app_dir_over_stale_config(monkeypatch, tmp_path):
+    app_dir = tmp_path / "DaleVision" / "app" / "1.0.43"
+    app_dir.mkdir(parents=True)
+    config_path = tmp_path / "agent_config.json"
+    config_path.write_text(json.dumps({"installed_version": "1.0.30"}), encoding="utf-8")
+
+    monkeypatch.setenv("DALE_APP_DIR", str(app_dir))
+    monkeypatch.setenv("DALE_AGENT_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("DALEVISION_EDGE_AGENT_VERSION", "1.0.30")
+
+    code, payload = build_setup_api_response(
+        path="/health",
+        discovery_provider=lambda: [],
+    )
+
+    assert code == 200
+    assert payload["version"] == "1.0.43"
 
 
 def test_setup_api_blueprint_response_uses_plan_and_scan_results():
