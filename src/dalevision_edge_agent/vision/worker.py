@@ -550,6 +550,8 @@ class VisionWorker:
             return "ponto_pagamento"
         if "fila" in value or "espera" in value:
             return "area_atendimento_fila"
+        if "balcao" in value or "atendimento" in value:
+            return "zona_funcionario_caixa"
         if "consumo" in value or "salao" in value or "sala" in value or "mesa" in value:
             return "area_consumo"
         if "entrada" in value or "saida" in value or "porta" in value:
@@ -1309,7 +1311,7 @@ class VisionWorker:
             return "entry_exit"
         if canonical in {"area_atendimento_fila", "fila", "espera"}:
             return "queue"
-        if canonical in {"ponto_pagamento", "caixa", "checkout"}:
+        if canonical in {"ponto_pagamento", "zona_funcionario_caixa", "caixa", "checkout"}:
             return "checkout_proxy"
         if canonical in {"area_consumo", "salao", "mesa"}:
             return "occupancy"
@@ -1326,11 +1328,14 @@ class VisionWorker:
             for name, pts in zones_raw.items():
                 if not name or not pts:
                     continue
-                zones[name] = [[int(p[0]), int(p[1])] for p in pts]
-                zone_meta[name] = {
+                canonical_name = self._canonical_shape_name(str(name))
+                if not canonical_name:
+                    continue
+                zones[canonical_name] = [[int(p[0]), int(p[1])] for p in pts]
+                zone_meta[canonical_name] = {
                     "zone_id": camera_zone_id,
-                    "roi_entity_id": name,
-                    "metric_type": self._infer_metric_type_from_name(name, "zone"),
+                    "roi_entity_id": canonical_name,
+                    "metric_type": self._infer_metric_type_from_name(canonical_name, "zone"),
                     "ownership": "primary",
                 }
             lines: Dict[str, List[List[int]]] = {}
@@ -1338,11 +1343,14 @@ class VisionWorker:
             for name, pts in lines_raw.items():
                 if not name or not pts or len(pts) != 2:
                     continue
-                lines[name] = [[int(pts[0][0]), int(pts[0][1])], [int(pts[1][0]), int(pts[1][1])]]
-                line_meta[name] = {
+                canonical_name = self._canonical_shape_name(str(name))
+                if not canonical_name:
+                    continue
+                lines[canonical_name] = [[int(pts[0][0]), int(pts[0][1])], [int(pts[1][0]), int(pts[1][1])]]
+                line_meta[canonical_name] = {
                     "zone_id": camera_zone_id,
-                    "roi_entity_id": name,
-                    "metric_type": self._infer_metric_type_from_name(name, "line"),
+                    "roi_entity_id": canonical_name,
+                    "metric_type": self._infer_metric_type_from_name(canonical_name, "line"),
                     "ownership": "primary",
                 }
             return {"zones": zones, "lines": lines, "zone_meta": zone_meta, "line_meta": line_meta}

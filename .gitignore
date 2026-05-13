@@ -233,3 +233,8 @@ yolov8*.pt
 .venv/
 __pycache__/
 *.log
+
+# --- Reversa Framework ---
+.reversa/
+.agents/
+_reversa_forward/
