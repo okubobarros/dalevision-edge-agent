@@ -71,13 +71,32 @@ class StreamManager:
     def get_snapshot(self, camera_id: str, rtsp_url: str) -> Optional[str]:
         """
         Gera um snapshot JPEG único para identificação visual rápida.
+        Tenta OpenCV primeiro, depois FFmpeg se OpenCV falhar/não existir.
         Retorna o caminho do arquivo gerado.
         """
         output_path = os.path.join(self.streams_dir, f"snap_{camera_id}.jpg")
         
-        # FFmpeg command for single frame capture
-        # -frames:v 1: Capture 1 frame
-        # -q:v 2: High quality JPEG
+        # 1. Tentar OpenCV
+        try:
+            import cv2
+            logger.info(f"Generating snapshot via OpenCV for {camera_id}...")
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "timeout;5000"
+            cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    cv2.imwrite(output_path, frame)
+                    cap.release()
+                    if os.path.exists(output_path):
+                        return output_path
+            cap.release()
+            logger.warning(f"OpenCV failed to capture frame for {camera_id}")
+        except ImportError:
+            logger.info("OpenCV not installed, falling back to FFmpeg process")
+        except Exception as e:
+            logger.warning(f"OpenCV exception for {camera_id}: {e}")
+
+        # 2. Tentar FFmpeg via CLI
         cmd = [
             "ffmpeg",
             "-y",
@@ -91,7 +110,7 @@ class StreamManager:
         ]
 
         try:
-            logger.info(f"Generating snapshot for {camera_id}...")
+            logger.info(f"Generating snapshot via FFmpeg CLI for {camera_id}...")
             subprocess.run(
                 cmd,
                 stdout=subprocess.DEVNULL,
@@ -102,8 +121,10 @@ class StreamManager:
             )
             if os.path.exists(output_path):
                 return output_path
+        except FileNotFoundError:
+            logger.error("FFmpeg executable not found in PATH")
         except Exception as e:
-            logger.error(f"Failed to generate snapshot for {camera_id}: {e}")
+            logger.error(f"Failed to generate snapshot via FFmpeg for {camera_id}: {e}")
         
         return None
 
