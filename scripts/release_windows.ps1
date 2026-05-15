@@ -298,3 +298,8 @@ if ($rootPs1.Count -gt 0) {
 }
 
 Write-Host "OK -> $zipName (ready for GitHub Release $Version)"
+
+# Criar cópia 'latest' para facilitar links estáticos no Render/Vercel
+$latestZip = Join-Path $repoRoot "dalevision-edge-agent-windows-latest.zip"
+Copy-Item $zipName $latestZip -Force
+Write-Host "OK -> $latestZip"
