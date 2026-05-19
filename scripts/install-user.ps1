@@ -3,7 +3,7 @@ param(
   [string]$Version = "",
   [string]$ActivationToken = "",
   [string]$ActivationTokenFile = "",
-  [string]$CloudBaseUrl = "",
+  [string]$CloudBaseUrl = "https://api.dalevision.com",
   [string]$OpenDashboard = "0"
 )
 
