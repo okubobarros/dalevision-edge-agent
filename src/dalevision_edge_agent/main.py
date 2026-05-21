@@ -88,6 +88,10 @@ VISION_PROXY_DEFAULT_BUCKET_SECONDS = 30
 VISION_PROXY_DEFAULT_BUCKET_SECONDS = 30
 DEGRADED_HEARTBEAT_INTERVAL_SECONDS = 300
 HEARTBEAT_BACKOFF_MAX_SECONDS = 300
+ONBOARDING_BURST_HEARTBEAT_INTERVAL_SECONDS = 5
+ONBOARDING_BURST_WINDOW_SECONDS = 90
+_SETUP_API_BOOTSTRAPPED = False
+_SETUP_API_DISCOVERY_HOOK: Optional[Callable[[list[dict[str, Any]], dict[str, Any]], None]] = None
 
 
 def _candidate_install_roots() -> list[Path]:
@@ -593,6 +597,14 @@ def _start_setup_api_background(
     logger: logging.Logger,
     on_discovery_result: Optional[Callable[[list[dict[str, Any]], dict[str, Any]], None]] = None,
 ) -> None:
+    global _SETUP_API_BOOTSTRAPPED, _SETUP_API_DISCOVERY_HOOK
+    if on_discovery_result is not None:
+        _SETUP_API_DISCOVERY_HOOK = on_discovery_result
+
+    if _SETUP_API_BOOTSTRAPPED:
+        logger.info("[SETUP_API] bootstrap skipped (already started)")
+        return
+
     enabled = _parse_bool_env("EDGE_SETUP_API_ENABLED", True)
     if not enabled:
         logger.info("[SETUP_API] disabled by EDGE_SETUP_API_ENABLED=0")
@@ -612,7 +624,11 @@ def _start_setup_api_background(
                 host=host,
                 port=port,
                 discovery_provider=lambda: run_scan(logger=logger),
-                on_discovery_result=on_discovery_result,
+                on_discovery_result=lambda scan_results, payload: (
+                    _SETUP_API_DISCOVERY_HOOK(scan_results, payload)
+                    if callable(_SETUP_API_DISCOVERY_HOOK)
+                    else None
+                ),
                 logger=logger,
             )
         except OSError as exc:
@@ -621,6 +637,7 @@ def _start_setup_api_background(
             logger.exception("[SETUP_API] FATAL: Unexpected failure during startup")
 
     threading.Thread(target=_runner, name="dalevision-setup-api", daemon=True).start()
+    _SETUP_API_BOOTSTRAPPED = True
     logger.info("[SETUP_API] bootstrap host=%s port=%s", host, port)
 
 
@@ -928,6 +945,24 @@ def _heartbeat_sleep_seconds(
     return max(1, int(active_interval_seconds))
 
 
+def _apply_onboarding_burst_sleep(
+    *,
+    base_sleep_seconds: int,
+    started_at: float,
+    now_ts: float,
+    burst_enabled: bool,
+    burst_window_seconds: int,
+    burst_interval_seconds: int,
+) -> int:
+    if not burst_enabled:
+        return max(1, int(base_sleep_seconds))
+    if burst_window_seconds <= 0:
+        return max(1, int(base_sleep_seconds))
+    if now_ts - started_at >= burst_window_seconds:
+        return max(1, int(base_sleep_seconds))
+    return max(1, min(int(base_sleep_seconds), int(burst_interval_seconds)))
+
+
 def _log_agent_state_transition(
     *,
     logger: logging.Logger,
@@ -1164,6 +1199,10 @@ def _floor_bucket(ts: float, bucket_seconds: int) -> tuple[str, str]:
 
 
 def main() -> int:
+    global _SETUP_API_BOOTSTRAPPED, _SETUP_API_DISCOVERY_HOOK
+    _SETUP_API_BOOTSTRAPPED = False
+    _SETUP_API_DISCOVERY_HOOK = None
+
     args = _parse_args()
     runtime_paths = resolve_runtime_paths(version=_get_version())
     os.environ.setdefault("DALE_APP_DIR", str(runtime_paths.app_dir))
@@ -1357,6 +1396,10 @@ def main() -> int:
             else:
                 print(f"❌ RTSP FAIL: {result.get('message')}")
         return 0
+
+    # Setup API precisa responder o mais cedo possível no onboarding (health/ping local),
+    # sem depender de bootstrap de ativação/cloud.
+    _start_setup_api_background(logger=logger)
 
     # Activation bootstrap (PR4): optional and backward compatible with legacy .env.
     activation_cloud_base_url = (
@@ -1781,6 +1824,24 @@ def main() -> int:
     )
     heartbeat_client = HeartbeatClient()
     started_at = time.time()
+    onboarding_burst_enabled = _parse_bool_env("ONBOARDING_BURST_ENABLED", True)
+    onboarding_burst_window_seconds = max(
+        0,
+        _parse_int_env("ONBOARDING_BURST_WINDOW_SECONDS", ONBOARDING_BURST_WINDOW_SECONDS),
+    )
+    onboarding_burst_interval_seconds = max(
+        1,
+        _parse_int_env(
+            "ONBOARDING_BURST_HEARTBEAT_INTERVAL_SECONDS",
+            ONBOARDING_BURST_HEARTBEAT_INTERVAL_SECONDS,
+        ),
+    )
+    logger.info(
+        "[HEARTBEAT] onboarding_burst enabled=%s window=%ss interval=%ss",
+        onboarding_burst_enabled,
+        onboarding_burst_window_seconds,
+        onboarding_burst_interval_seconds,
+    )
     degraded_heartbeat_interval_seconds = _parse_int_env(
         "DEGRADED_HEARTBEAT_INTERVAL_SECONDS",
         DEGRADED_HEARTBEAT_INTERVAL_SECONDS,
@@ -2452,6 +2513,14 @@ def main() -> int:
                 degraded_interval_seconds=degraded_heartbeat_interval_seconds,
                 backoff_index=backoff_index,
             )
+            sleep_seconds = _apply_onboarding_burst_sleep(
+                base_sleep_seconds=sleep_seconds,
+                started_at=started_at,
+                now_ts=time.time(),
+                burst_enabled=onboarding_burst_enabled,
+                burst_window_seconds=onboarding_burst_window_seconds,
+                burst_interval_seconds=onboarding_burst_interval_seconds,
+            )
             time.sleep(sleep_seconds)
             continue
 
@@ -2493,6 +2562,14 @@ def main() -> int:
             active_interval_seconds=settings.heartbeat_interval_seconds,
             degraded_interval_seconds=degraded_heartbeat_interval_seconds,
             backoff_index=backoff_index,
+        )
+        wait_seconds = _apply_onboarding_burst_sleep(
+            base_sleep_seconds=wait_seconds,
+            started_at=started_at,
+            now_ts=time.time(),
+            burst_enabled=onboarding_burst_enabled,
+            burst_window_seconds=onboarding_burst_window_seconds,
+            burst_interval_seconds=onboarding_burst_interval_seconds,
         )
         print(f"Retry in {wait_seconds}s ...")
         logger.info("Retry in %ss", wait_seconds)
