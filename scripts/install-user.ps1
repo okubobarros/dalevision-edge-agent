@@ -134,9 +134,9 @@ function Resolve-AppDashboardUrl {
   )
   $defaultBase = "https://app.dalevision.com"
   if ([string]::IsNullOrWhiteSpace($CloudBaseUrl)) {
-    if (-not [string]::IsNullOrWhiteSpace($StoreId)) {
-      return ("{0}/app/dashboard?store={1}&openEdgeSetup=1" -f $defaultBase.TrimEnd("/"), $StoreId)
-    }
+  if (-not [string]::IsNullOrWhiteSpace($StoreId)) {
+    return ("{0}/app/dashboard?store_id={1}&openEdgeSetup=1" -f $defaultBase.TrimEnd("/"), $StoreId)
+  }
     return ("{0}/app/dashboard?openEdgeSetup=1" -f $defaultBase.TrimEnd("/"))
   }
   $base = $CloudBaseUrl.Trim()
@@ -149,7 +149,7 @@ function Resolve-AppDashboardUrl {
   }
   $base = $base.TrimEnd("/")
   if (-not [string]::IsNullOrWhiteSpace($StoreId)) {
-    return ("{0}/app/dashboard?store={1}&openEdgeSetup=1" -f $base, $StoreId)
+    return ("{0}/app/dashboard?store_id={1}&openEdgeSetup=1" -f $base, $StoreId)
   }
   return ("{0}/app/dashboard?openEdgeSetup=1" -f $base)
 }
