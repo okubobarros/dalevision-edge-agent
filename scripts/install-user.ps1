@@ -4,7 +4,7 @@ param(
   [string]$ActivationToken = "",
   [string]$ActivationTokenFile = "",
   [string]$CloudBaseUrl = "https://api.dalevision.com",
-  [string]$OpenDashboard = "0"
+  [string]$OpenDashboard = "1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -165,6 +165,28 @@ function Parse-BoolString {
     "yes" { return $true }
     "on" { return $true }
     default { return $false }
+  }
+}
+
+function Get-EnvValue {
+  param(
+    [string]$EnvPath,
+    [string]$Key
+  )
+  if ([string]::IsNullOrWhiteSpace($EnvPath) -or [string]::IsNullOrWhiteSpace($Key) -or -not (Test-Path $EnvPath)) {
+    return ""
+  }
+  try {
+    $line = Get-Content -Path $EnvPath -Encoding UTF8 |
+      Where-Object { $_ -match "^\s*$Key\s*=" } |
+      Select-Object -First 1
+    if ([string]::IsNullOrWhiteSpace($line)) {
+      return ""
+    }
+    $value = ($line -replace "^\s*$Key\s*=\s*", "").Trim()
+    return $value
+  } catch {
+    return ""
   }
 }
 
@@ -373,8 +395,20 @@ Start-Process -FilePath $runCmd -WorkingDirectory $targetRoot -WindowStyle Hidde
 Write-Log "INSTALL007 run_started"
 $shouldOpenDashboard = Parse-BoolString -RawValue $OpenDashboard
 if ($shouldOpenDashboard) {
-  Write-Log "INSTALL008 agent_headless_mode_active (browser opening skipped to maintain dashboard context)"
-  # No dashboard opening from the installer; the Cloud App Modal is already polling localhost:8787
+  $storeIdForRedirect = ""
+  if ($agentConfig.ContainsKey("store_id")) {
+    $storeIdForRedirect = [string]$agentConfig["store_id"]
+  }
+  if ([string]::IsNullOrWhiteSpace($storeIdForRedirect)) {
+    $storeIdForRedirect = Get-EnvValue -EnvPath $envTarget -Key "STORE_ID"
+  }
+  $dashboardUrl = Resolve-AppDashboardUrl -CloudBaseUrl $CloudBaseUrl -StoreId $storeIdForRedirect
+  try {
+    Start-Process $dashboardUrl | Out-Null
+    Write-Log ("INSTALL008 app_opened url={0}" -f $dashboardUrl)
+  } catch {
+    Write-Log ("INSTALL008A app_open_failed err={0} url={1}" -f $_.Exception.Message, $dashboardUrl)
+  }
 } else {
   Write-Log "INSTALL008 app_open_skipped"
 }

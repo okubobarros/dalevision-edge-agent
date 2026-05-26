@@ -4,11 +4,10 @@ Agente local para manter a loja online no cloud e monitorar a saúde das câmera
 
 ## Quick Start (Windows)
 1. Baixe o ZIP oficial e extraia.
-2. Edite o `.env` com `CLOUD_BASE_URL`, `STORE_ID`, `EDGE_TOKEN` e `AGENT_ID`.
-3. Teste: execute `01_TESTE_RAPIDO.bat` e aguarde `status=201`.
-4. Produção: execute `02_INSTALAR_AUTOSTART.bat` (admin) e reinicie o PC.
-5. Verifique: execute `03_VERIFICAR_STATUS.bat`.
-6. Para remover: execute `04_REMOVER_AUTOSTART.bat`.
+2. Execute o instalador (`DaleVisionEdgeSetup*.exe`) via fluxo do app.
+3. O instalador faz bootstrap automático (token/loja) e abre o dashboard para continuar onboarding.
+4. Verifique no app se o Edge ficou online e siga para câmeras/ROI.
+5. Fallback técnico (somente suporte): editar `.env` manual com `CLOUD_BASE_URL`, `STORE_ID`, `EDGE_TOKEN` e `AGENT_ID`.
 
 ## Configuração recomendada (produção)
 - Manter heartbeat sempre ativo mesmo com falhas temporárias de câmeras:
