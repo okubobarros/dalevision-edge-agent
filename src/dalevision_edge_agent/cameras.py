@@ -21,7 +21,7 @@ CAMERA_LIST_ENDPOINTS = (
     "/api/v1/stores/{store_id}/cameras/",
 )
 ROI_ENDPOINTS = (
-    "/api/v1/cameras/{camera_id}/roi/latest",
+    "/api/v1/cameras/{camera_id}/roi/latest/",
 )
 HEALTH_ENDPOINT = "/api/v1/cameras/{camera_id}/health/"
 EDGE_EVENTS_ENDPOINT = "/api/edge/events/"
@@ -384,6 +384,20 @@ def fetch_roi(
             auth_tracker=auth_tracker,
         )
         if payload is None:
+            if status == 404:
+                logger.info(
+                    "camera_id=%s ROI not found (status=404). Using empty ROI payload.",
+                    camera_id,
+                )
+                empty_payload = {
+                    "camera_id": camera_id,
+                    "version": 0,
+                    "config_json": None,
+                    "updated_at": None,
+                    "updated_by": None,
+                }
+                _save_cached_roi(camera_id=camera_id, payload=empty_payload, cache_dir=cache_dir)
+                return empty_payload, "0", False, None
             logger.warning(
                 "camera_id=%s ROI fetch failed on %s (status=%s error=%s)",
                 camera_id,

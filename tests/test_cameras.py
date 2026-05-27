@@ -90,6 +90,26 @@ class CamerasTests(unittest.TestCase):
         self.assertEqual(1, fields["cameras_unknown"])
         self.assertEqual(4, len(fields["cameras"]))
 
+    @patch("dalevision_edge_agent.cameras.requests.request")
+    def test_fetch_roi_handles_404_as_empty_payload(self, mock_request: Mock) -> None:
+        mock_response = Mock()
+        mock_response.status_code = 404
+        mock_response.text = "not found"
+        mock_request.return_value = mock_response
+
+        payload, version, from_cache, error = fetch_roi(
+            "cam-missing",
+            cloud_base_url="https://api.example.com",
+            edge_token="token",
+        )
+
+        self.assertIsNone(error)
+        self.assertFalse(from_cache)
+        self.assertEqual("0", version)
+        self.assertIsNotNone(payload)
+        self.assertEqual("cam-missing", payload.get("camera_id"))
+        self.assertIsNone(payload.get("config_json"))
+
     def test_build_auth_headers(self) -> None:
         headers = build_auth_headers("edge-token-123")
         self.assertEqual("Bearer edge-token-123", headers.get("Authorization"))
