@@ -183,3 +183,29 @@ def test_setup_api_installation_check_response_uses_builder(monkeypatch):
     assert payload["ok"] is True
     assert payload["status"] == "ready"
     assert captured == {"called": True}
+
+
+def test_setup_api_local_runtime_diagnostics_response(monkeypatch):
+    def fake_run_cmd(command: str, timeout_seconds: int = 8):
+        if "netstat" in command:
+            return "TCP    127.0.0.1:8787     0.0.0.0:0      LISTENING      1234"
+        if "tasklist" in command:
+            return "python.exe                   1234 Console                    1     50,000 K"
+        if "schtasks" in command:
+            return "TaskName: \\DaleVision Edge Agent"
+        if "sc query" in command:
+            return "SERVICE_NAME: DaleVisionEdgeAgent"
+        return ""
+
+    monkeypatch.setattr("dalevision_edge_agent.setup_api._run_cmd", fake_run_cmd)
+
+    code, payload = build_setup_api_response(
+        path="/onboarding/local-runtime-diagnostics",
+        discovery_provider=lambda: [],
+    )
+
+    assert code == 200
+    assert payload["ok"] is True
+    assert payload["runtime_local_reachable"] is True
+    assert payload["checks"]["port_8787_listening"] is True
+    assert payload["checks"]["python_process_detected"] is True

@@ -7,6 +7,7 @@ import json
 import logging
 import socket
 import importlib.metadata
+import platform
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
@@ -17,6 +18,7 @@ from .installation_check import build_installation_check_payload
 from .onboarding_readiness import build_onboarding_readiness
 from .scan import build_onboarding_blueprint
 from .streaming import stream_manager
+from .diagnostics import _run_cmd
 
 
 DiscoveryProvider = Callable[[], list[dict[str, Any]]]
@@ -97,6 +99,40 @@ def build_setup_api_response(
             pass
         return list(set(ips))
 
+    def build_local_runtime_diagnostics() -> dict[str, Any]:
+        is_windows = platform.system().lower().startswith("win")
+        netstat_output = _run_cmd("netstat -ano | findstr :8787")
+        tasklist_output = _run_cmd('tasklist /FI "IMAGENAME eq python.exe"')
+        scheduler_output = _run_cmd('schtasks /Query /FO LIST /V | findstr /I "DaleVision Edge Agent"')
+        service_output = _run_cmd('sc query type= service state= all | findstr /I "DaleVision"')
+
+        return {
+            "ok": True,
+            "runtime_local_reachable": True,
+            "host_os": platform.system(),
+            "is_windows": is_windows,
+            "checks": {
+                "port_8787_listening": bool(netstat_output and "LISTENING" in netstat_output.upper()),
+                "python_process_detected": bool(tasklist_output and "python.exe" in tasklist_output.lower()),
+                "scheduled_task_detected": bool(
+                    scheduler_output
+                    and "INFO:" not in scheduler_output.upper()
+                    and "[command_error]" not in scheduler_output
+                ),
+                "service_detected": bool(
+                    service_output
+                    and "SERVICE_NAME" in service_output.upper()
+                    and "[command_error]" not in service_output
+                ),
+            },
+            "raw": {
+                "netstat_8787": netstat_output[:2000],
+                "tasklist_python": tasklist_output[:2000],
+                "schtasks_dalevision": scheduler_output[:2000],
+                "services_dalevision": service_output[:2000],
+            },
+        }
+
     if route == "/health":
         return 200, {
             "ok": True,
@@ -152,6 +188,10 @@ def build_setup_api_response(
 
     if route == "/onboarding/installation-check":
         payload = build_installation_check_payload()
+        return 200, payload
+
+    if route == "/onboarding/local-runtime-diagnostics":
+        payload = build_local_runtime_diagnostics()
         return 200, payload
 
     if route == "/onboarding/test-camera":
