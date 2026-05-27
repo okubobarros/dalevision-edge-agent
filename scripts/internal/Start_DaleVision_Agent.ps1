@@ -105,6 +105,8 @@ $env:DALE_LOG_DIR = $logDirSafe
 $env:DALE_CACHE_DIR = $cacheDirSafe
 $env:DALE_ENV_PATH = (Join-Path $configDirSafe ".env")
 $env:DALE_AGENT_CONFIG_PATH = (Join-Path $configDirSafe "agent_config.json")
+$pausedMarkerPath = Join-Path $configDirSafe "runtime.paused"
+$decommissionedMarkerPath = Join-Path $configDirSafe "runtime.decommissioned"
 
 Write-Host ("RUN_MODE=" + $env:DALE_RUN_MODE)
 Write-Host ("TEMP=" + $env:TEMP)
@@ -113,6 +115,8 @@ Write-Host ("USER=" + $env:USERNAME)
 Write-Host ("CONFIG_DIR=" + $env:DALE_CONFIG_DIR)
 Write-Host ("LOG_DIR=" + $env:DALE_LOG_DIR)
 Write-Host ("CACHE_DIR=" + $env:DALE_CACHE_DIR)
+Write-Host ("PAUSED_MARKER=" + $pausedMarkerPath)
+Write-Host ("DECOMMISSIONED_MARKER=" + $decommissionedMarkerPath)
 
 Set-Location -Path $installRoot
 
@@ -158,6 +162,18 @@ function Get-EnvBool {
   }
 }
 
+function Should-HaltLaunch {
+  if (Test-Path $decommissionedMarkerPath) {
+    Write-Host "EXIT_REASON=decommissioned_marker"
+    return $true
+  }
+  if (Test-Path $pausedMarkerPath) {
+    Write-Host "EXIT_REASON=paused_marker"
+    return $true
+  }
+  return $false
+}
+
 $restartEnabled = Get-EnvBool -Name "LAUNCHER_RESTART_ENABLED" -DefaultValue $true
 $restartDelaySeconds = Get-EnvInt -Name "LAUNCHER_RESTART_DELAY_SECONDS" -DefaultValue 5
 $restartMax = Get-EnvInt -Name "LAUNCHER_RESTART_MAX" -DefaultValue 1000
@@ -177,6 +193,9 @@ try {
   }
 
   while ($true) {
+    if (Should-HaltLaunch) {
+      exit 0
+    }
     $restartCount += 1
     Write-Host ("LAUNCH_ATTEMPT=" + $restartCount)
 
@@ -210,6 +229,10 @@ try {
     if ($restartCount -ge $restartMax) {
       Write-Host "EXIT_REASON=restart_limit_reached"
       exit $exitCode
+    }
+
+    if (Should-HaltLaunch) {
+      exit 0
     }
 
     Write-Host ("RESTARTING_IN_SECONDS=" + $restartDelaySeconds)

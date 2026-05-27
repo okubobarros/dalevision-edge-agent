@@ -209,3 +209,32 @@ def test_setup_api_local_runtime_diagnostics_response(monkeypatch):
     assert payload["runtime_local_reachable"] is True
     assert payload["checks"]["port_8787_listening"] is True
     assert payload["checks"]["python_process_detected"] is True
+
+
+def test_setup_api_runtime_control_pause_and_resume(monkeypatch, tmp_path):
+    monkeypatch.setenv("DALE_CONFIG_DIR", str(tmp_path))
+
+    code_pause, payload_pause = build_setup_api_response(
+        path="/onboarding/runtime-control?action=pause",
+        discovery_provider=lambda: [],
+    )
+    assert code_pause == 200
+    assert payload_pause["ok"] is True
+    assert payload_pause["action"] == "pause"
+    assert payload_pause["state"]["paused"] is True
+
+    code_status, payload_status = build_setup_api_response(
+        path="/onboarding/runtime-control?action=status",
+        discovery_provider=lambda: [],
+    )
+    assert code_status == 200
+    assert payload_status["state"]["paused"] is True
+
+    code_resume, payload_resume = build_setup_api_response(
+        path="/onboarding/runtime-control?action=resume",
+        discovery_provider=lambda: [],
+    )
+    assert code_resume == 200
+    assert payload_resume["ok"] is True
+    assert payload_resume["action"] == "resume"
+    assert payload_resume["state"]["paused"] is False

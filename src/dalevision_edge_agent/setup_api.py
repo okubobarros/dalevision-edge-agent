@@ -8,6 +8,8 @@ import logging
 import socket
 import importlib.metadata
 import platform
+import subprocess
+import threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
@@ -98,6 +100,69 @@ def build_setup_api_response(
         except:
             pass
         return list(set(ips))
+
+    def _runtime_marker_dir() -> Path:
+        config_dir = str(os.getenv("DALE_CONFIG_DIR") or "").strip()
+        if config_dir:
+            base = Path(config_dir)
+        elif os.getenv("APPDATA"):
+            base = Path(str(os.getenv("APPDATA"))) / "DaleVision"
+        else:
+            base = Path.cwd() / "config"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def _paused_marker() -> Path:
+        return _runtime_marker_dir() / "runtime.paused"
+
+    def _decommissioned_marker() -> Path:
+        return _runtime_marker_dir() / "runtime.decommissioned"
+
+    def _runtime_state_snapshot() -> dict[str, Any]:
+        paused = _paused_marker()
+        decommissioned = _decommissioned_marker()
+        return {
+            "paused": paused.exists(),
+            "decommissioned": decommissioned.exists(),
+            "paused_marker_path": str(paused),
+            "decommissioned_marker_path": str(decommissioned),
+        }
+
+    def _resolve_scripts_root() -> Path:
+        app_dir = str(os.getenv("DALE_APP_DIR") or "").strip()
+        if app_dir:
+            candidate = Path(app_dir) / "scripts"
+            if candidate.exists():
+                return candidate
+        cwd_scripts = Path.cwd() / "scripts"
+        if cwd_scripts.exists():
+            return cwd_scripts
+        return Path.cwd()
+
+    def _run_ps1_detached(script_name: str, extra_args: list[str] | None = None) -> dict[str, Any]:
+        script_path = _resolve_scripts_root() / script_name
+        if not script_path.exists():
+            return {"ok": False, "error": f"script_not_found:{script_path}"}
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script_path),
+        ] + (extra_args or [])
+        try:
+            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return {"ok": True, "script": str(script_path)}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "script": str(script_path)}
+
+    def _request_graceful_exit(delay_seconds: float = 0.8) -> None:
+        def _exit_later() -> None:
+            time.sleep(max(0.1, delay_seconds))
+            os._exit(0)
+
+        threading.Thread(target=_exit_later, daemon=True).start()
 
     def build_local_runtime_diagnostics() -> dict[str, Any]:
         is_windows = platform.system().lower().startswith("win")
@@ -193,6 +258,66 @@ def build_setup_api_response(
     if route == "/onboarding/local-runtime-diagnostics":
         payload = build_local_runtime_diagnostics()
         return 200, payload
+
+    if route == "/onboarding/runtime-control":
+        action = str((query.get("action") or ["status"])[0] or "status").strip().lower()
+        state = _runtime_state_snapshot()
+
+        if action == "status":
+            return 200, {"ok": True, "action": "status", "state": state}
+
+        if action == "pause":
+            marker = _paused_marker()
+            marker.write_text(
+                json.dumps({"ts": time.time(), "reason": "paused_via_setup_api"}, ensure_ascii=True),
+                encoding="utf-8",
+            )
+            state = _runtime_state_snapshot()
+            return 200, {"ok": True, "action": "pause", "state": state}
+
+        if action == "resume":
+            _paused_marker().unlink(missing_ok=True)
+            state = _runtime_state_snapshot()
+            return 200, {"ok": True, "action": "resume", "state": state}
+
+        if action == "stop":
+            marker = _paused_marker()
+            marker.write_text(
+                json.dumps({"ts": time.time(), "reason": "stop_via_setup_api"}, ensure_ascii=True),
+                encoding="utf-8",
+            )
+            stop_result = _run_ps1_detached("stop-agent.ps1")
+            _request_graceful_exit()
+            state = _runtime_state_snapshot()
+            return 200, {
+                "ok": True,
+                "action": "stop",
+                "state": state,
+                "stop_result": stop_result,
+            }
+
+        if action == "decommission":
+            _paused_marker().write_text(
+                json.dumps({"ts": time.time(), "reason": "decommission_via_setup_api"}, ensure_ascii=True),
+                encoding="utf-8",
+            )
+            _decommissioned_marker().write_text(
+                json.dumps({"ts": time.time(), "reason": "decommission_via_setup_api"}, ensure_ascii=True),
+                encoding="utf-8",
+            )
+            uninstall_result = _run_ps1_detached("uninstall-service.ps1")
+            stop_result = _run_ps1_detached("stop-agent.ps1")
+            _request_graceful_exit()
+            state = _runtime_state_snapshot()
+            return 200, {
+                "ok": True,
+                "action": "decommission",
+                "state": state,
+                "uninstall_result": uninstall_result,
+                "stop_result": stop_result,
+            }
+
+        return 400, {"ok": False, "error": "invalid_action", "action": action}
 
     if route == "/onboarding/test-camera":
         ip = (query.get("ip") or [""])[0]
