@@ -609,7 +609,8 @@ function Invoke-InstallService {
         if ($envVars["API_BASE_URL"] -match "localhost|127.0.0.1") {
             $baseUrl = "http://localhost:5173"
         }
-        $targetUrl = "${baseUrl}/app/dashboard?activation_success=true&store_id=${storeId}"
+        $returnTs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $targetUrl = "${baseUrl}/app/dashboard?activation_success=true&openEdgeSetup=1&store_id=${storeId}&source=edge_installer&return_ts=${returnTs}"
         Write-Log "Abrindo navegador em: $targetUrl"
         try {
             Start-Process $targetUrl

@@ -15,6 +15,10 @@ Alinhar o edge-agent à nova jornada unificada do produto:
    - `/app/dashboard?openEdgeSetup=1&store_id=<STORE_ID>&source=edge_installer`
 4. Se não conseguir abrir navegador, mostrar instrução objetiva com URL/copiar-colar.
 
+Status de implementação:
+- ✅ `scripts/install-user.ps1` atualizado para abrir URL canônica com `source=edge_installer` e `return_ts`.
+- ✅ `scripts/install-service.ps1` atualizado para abrir URL canônica com `openEdgeSetup=1`, `store_id`, `source`, `return_ts`.
+
 ## Requisitos UX mínimos no installer
 - Mensagem final obrigatória:
   - “Instalação concluída. Clique em **Voltar para o DaleVision** para continuar a ativação.”
