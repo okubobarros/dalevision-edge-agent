@@ -6,7 +6,6 @@ import time
 import json
 import logging
 import socket
-import importlib.metadata
 import platform
 import subprocess
 import threading
@@ -15,12 +14,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
-from .activation import ConfigManager
 from .installation_check import build_installation_check_payload
 from .onboarding_readiness import build_onboarding_readiness
 from .scan import build_onboarding_blueprint
 from .streaming import stream_manager
 from .diagnostics import _run_cmd
+from .versioning import resolve_agent_version
 
 
 DiscoveryProvider = Callable[[], list[dict[str, Any]]]
@@ -31,51 +30,6 @@ def _redact_sensitive_text(value: str) -> str:
     text = str(value or "")
     # Avoid leaking camera credentials when lower-level libraries include RTSP URLs in errors.
     return re.sub(r"(rtsp://[^:/\s]+:)[^@\s]+@", r"\1***@", text)
-
-
-def _looks_like_version(value: str) -> bool:
-    return bool(re.fullmatch(r"v?\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9._-]+)?", str(value or "").strip()))
-
-
-def _version_from_path(path: Path) -> str:
-    for candidate in (path, Path.cwd()):
-        name = candidate.name.strip()
-        if _looks_like_version(name):
-            return name.lstrip("v")
-    return ""
-
-
-def _resolve_agent_version() -> str:
-    app_dir = str(os.getenv("DALE_APP_DIR") or "").strip()
-    if app_dir:
-        app_dir_path = Path(app_dir)
-        path_version = _version_from_path(app_dir_path)
-        if path_version:
-            return path_version
-        try:
-            version_file = app_dir_path / "VERSION"
-            version_value = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
-            if version_value:
-                return version_value
-        except Exception:
-            pass
-
-    env_version = str(
-        os.getenv("DALEVISION_EDGE_AGENT_VERSION")
-        or os.getenv("EDGE_AGENT_VERSION")
-        or ""
-    ).strip()
-    if env_version:
-        return env_version
-
-    installed_version = str(ConfigManager.from_default().load().get("installed_version") or "").strip()
-    if installed_version:
-        return installed_version
-
-    try:
-        return importlib.metadata.version("dalevision-edge-agent")
-    except Exception:
-        return "unknown"
 
 
 def build_setup_api_response(
@@ -203,7 +157,7 @@ def build_setup_api_response(
             "ok": True,
             "service": "edge_setup_api",
             "status": "online",
-            "version": _resolve_agent_version(),
+            "version": resolve_agent_version(),
             "ips": get_local_ips(),
             "capabilities": {
                 "onboarding_blueprint": True,

@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import ctypes
 from datetime import datetime, timezone
-import importlib.metadata
 import json
 import logging
 from logging.handlers import RotatingFileHandler
@@ -60,6 +59,7 @@ from .onboarding_events import send_onboarding_event
 from .rtsp_test import test_rtsp, test_rtsp_channels
 from .scan import build_onboarding_blueprint, run_discovery, run_scan
 from .setup_api import serve_setup_api
+from .versioning import resolve_agent_version
 from .paths import cleanup_old_runtime_tmp, resolve_runtime_paths
 from .update import (
     apply_update_if_possible,
@@ -428,10 +428,7 @@ def _setup_logging() -> logging.Logger:
 
 
 def _get_version() -> str:
-    try:
-        return importlib.metadata.version("dalevision-edge-agent")
-    except Exception:
-        return "unknown"
+    return resolve_agent_version()
 
 
 def _parse_args() -> argparse.Namespace:
