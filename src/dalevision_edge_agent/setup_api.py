@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 from .installation_check import build_installation_check_payload
 from .onboarding_readiness import build_onboarding_readiness
@@ -164,6 +164,8 @@ def build_setup_api_response(
                 "onboarding_readiness": True,
                 "onboarding_installation_check": True,
                 "streaming_hls": True,
+                "test_stream": True,
+                "dvrip_icsee": True,
             },
         }
 
@@ -294,6 +296,88 @@ def build_setup_api_response(
         )
         return 200, result
 
+    if route == "/onboarding/test-rtsp":
+        from .rtsp_test import test_rtsp_by_url
+        import logging
+
+        rtsp_url = str((query.get("rtsp_url") or [""])[0] or "").strip()
+        if not rtsp_url or not rtsp_url.startswith(("rtsp://", "rtsps://")):
+            return 400, {"ok": False, "error": "rtsp_url_required"}
+        logger = logging.getLogger("setup_api.test_rtsp")
+        result = test_rtsp_by_url(rtsp_url=rtsp_url, timeout_seconds=6, logger=logger)
+        return 200, result
+
+    if route == "/onboarding/test-stream":
+        import logging
+        from .dvrip_icsee import probe_dvrip_icsee
+        from .rtsp_test import test_rtsp, test_rtsp_by_url
+
+        connection_type = str((query.get("connection_type") or ["auto"])[0] or "auto").strip().lower()
+        ip = str((query.get("ip") or [""])[0] or "").strip()
+        user = str((query.get("user") or ["admin"])[0] or "admin")
+        password = str((query.get("password") or [""])[0] or "")
+        rtsp_url = str((query.get("rtsp_url") or [""])[0] or "").strip()
+        channel = int((query.get("channel") or ["1"])[0] or 1)
+        dvrip_port = int((query.get("dvrip_port") or ["34567"])[0] or 34567)
+        logger = logging.getLogger("setup_api.test_stream")
+        attempts: list[dict[str, Any]] = []
+
+        if connection_type in {"auto", "rtsp"}:
+            rtsp_result = (
+                test_rtsp_by_url(rtsp_url=rtsp_url, timeout_seconds=6, logger=logger)
+                if rtsp_url
+                else test_rtsp(
+                    ip=ip,
+                    user=user,
+                    password=password,
+                    channel=channel,
+                    subtype=0,
+                    timeout_seconds=6,
+                    logger=logger,
+                )
+            )
+            attempts.append(
+                {
+                    "protocol": "rtsp",
+                    "ok": bool(rtsp_result.get("ok")),
+                    "error": str(rtsp_result.get("error") or rtsp_result.get("message") or ""),
+                }
+            )
+            if rtsp_result.get("ok"):
+                return 200, {
+                    "ok": True,
+                    "validated_protocol": "rtsp",
+                    "attempts": attempts,
+                    "result": rtsp_result,
+                }
+
+        if connection_type in {"auto", "dvrip"}:
+            dvrip_result = probe_dvrip_icsee(
+                ip=ip,
+                port=dvrip_port,
+                username=user,
+                password=password,
+                timeout_seconds=6,
+                channel_candidates=[0, 1],
+                stream_candidates=["main", "extra"],
+            )
+            attempts.append(
+                {
+                    "protocol": "dvrip",
+                    "ok": bool(dvrip_result.get("ok")),
+                    "error": str(dvrip_result.get("error") or ""),
+                }
+            )
+            if dvrip_result.get("ok"):
+                return 200, {
+                    "ok": True,
+                    "validated_protocol": "dvrip",
+                    "attempts": attempts,
+                    "result": dvrip_result,
+                }
+
+        return 200, {"ok": False, "attempts": attempts, "error": "validation_failed"}
+
     if route == "/onboarding/snapshot":
         ip = (query.get("ip") or [""])[0]
         user = (query.get("user") or ["admin"])[0]
@@ -371,6 +455,30 @@ def serve_setup_api(
             self.send_response(204)
             self._set_cors_headers()
             self.end_headers()
+
+        def do_POST(self):  # noqa: N802
+            parsed = urlparse(self.path)
+            route = parsed.path.rstrip("/") or "/"
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length > 0 else b"{}"
+            try:
+                payload = json.loads(raw.decode("utf-8")) if raw else {}
+            except Exception:
+                payload = {}
+
+            if route in {"/onboarding/test-rtsp", "/onboarding/test-stream"}:
+                query_payload = {key: value for key, value in payload.items() if value is not None}
+                encoded = urlencode(query_payload, doseq=True)
+                path = route if not encoded else f"{route}?{encoded}"
+                code, body = build_setup_api_response(
+                    path=path,
+                    discovery_provider=discovery_provider,
+                    on_discovery_result=on_discovery_result,
+                )
+                self._write_json(code, body)
+                return
+
+            self._write_json(404, {"ok": False, "error": "not_found"})
 
         def do_GET(self):  # noqa: N802
             parsed = urlparse(self.path)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from .cameras import (
     capture_snapshot_if_possible,
@@ -144,3 +145,44 @@ def test_rtsp_channels(
         if result.get("message") == "RTSP401 credencial invalida":
             break
     return {"results": results}
+
+
+def test_rtsp_by_url(
+    *,
+    rtsp_url: str,
+    timeout_seconds: int,
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    safe_url = mask_rtsp_url(rtsp_url)
+    logger.info("RTSPTEST trying %s", safe_url)
+    parsed = urlparse(rtsp_url)
+    ip = str(parsed.hostname or "").strip()
+    if not ip:
+        return {"ok": False, "error": "rtsp_url_invalid"}
+
+    health = check_camera_health(
+        {"ip": ip},
+        perform_describe=True,
+        rtsp_url_override=rtsp_url,
+        timeout_seconds=timeout_seconds,
+    )
+    if health.get("status") not in {"online", "degraded"}:
+        error = str(health.get("error") or "unknown")
+        return {
+            "ok": False,
+            "error": error,
+            "method": "rtsp_probe",
+            "health": health,
+        }
+    snapshot = capture_snapshot_if_possible(
+        camera_id=f"rtsp-{ip.replace(':', '_')}",
+        rtsp_url=rtsp_url,
+        logger=logger,
+        timeout_seconds=timeout_seconds,
+    )
+    return {
+        "ok": True,
+        "method": "rtsp_probe",
+        "health": health,
+        "snapshot": snapshot,
+    }

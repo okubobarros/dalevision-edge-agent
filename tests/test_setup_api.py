@@ -13,6 +13,45 @@ def test_setup_api_health_response():
     assert payload["ok"] is True
     assert payload["service"] == "edge_setup_api"
     assert payload["capabilities"]["onboarding_installation_check"] is True
+    assert payload["capabilities"]["test_stream"] is True
+    assert payload["capabilities"]["dvrip_icsee"] is True
+
+
+def test_setup_api_test_rtsp_requires_rtsp_url():
+    code, payload = build_setup_api_response(
+        path="/onboarding/test-rtsp",
+        discovery_provider=lambda: [],
+    )
+    assert code == 400
+    assert payload["ok"] is False
+    assert payload["error"] == "rtsp_url_required"
+
+
+def test_setup_api_test_stream_auto_falls_back_to_dvrip(monkeypatch):
+    monkeypatch.setattr(
+        "dalevision_edge_agent.rtsp_test.test_rtsp",
+        lambda **_kwargs: {"ok": False, "error": "rtsp_timeout"},
+    )
+    monkeypatch.setattr(
+        "dalevision_edge_agent.dvrip_icsee.probe_dvrip_icsee",
+        lambda **_kwargs: {
+            "ok": True,
+            "protocol": "dvrip",
+            "working_channel": 0,
+            "working_stream": "main",
+            "latency_ms": 123,
+        },
+    )
+
+    code, payload = build_setup_api_response(
+        path="/onboarding/test-stream?connection_type=auto&ip=192.168.15.74&user=admin&password=pass",
+        discovery_provider=lambda: [],
+    )
+    assert code == 200
+    assert payload["ok"] is True
+    assert payload["validated_protocol"] == "dvrip"
+    assert payload["attempts"][0]["protocol"] == "rtsp"
+    assert payload["attempts"][1]["protocol"] == "dvrip"
 
 
 def test_setup_api_health_uses_installed_version_from_config(monkeypatch, tmp_path):
