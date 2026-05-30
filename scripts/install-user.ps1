@@ -205,6 +205,7 @@ $cacheDir = Join-Path $dvLocal "cache"
 $configDir = Join-Path $roam "DaleVision"
 $startupDir = Join-Path $roam "Microsoft\Windows\Start Menu\Programs\Startup"
 $startupLink = Join-Path $startupDir "DaleVision Edge Agent.lnk"
+$startupDisabledLink = Join-Path $startupDir "DaleVision Edge Agent.lnk.disabled"
 $desktopDir = [Environment]::GetFolderPath("Desktop")
 $configShortcut = Join-Path $desktopDir "DaleVision Config.lnk"
 
@@ -213,6 +214,16 @@ Ensure-Dir $logDir
 Ensure-Dir $cacheDir
 Ensure-Dir $configDir
 Ensure-Dir $startupDir
+
+# Safety guard: stale ".lnk.disabled" can trigger wrong file association popups.
+if (Test-Path $startupDisabledLink) {
+  try {
+    Remove-Item -LiteralPath $startupDisabledLink -Force -ErrorAction Stop
+    Write-Log "INSTALL004B removed_stale_startup_disabled_link"
+  } catch {
+    Write-Log ("INSTALL004C failed_remove_stale_disabled_link err={0}" -f $_.Exception.Message)
+  }
+}
 
 $script:LogPath = Join-Path $logDir "install-user.log"
 Write-Log "INSTALL001 start source=$SourceRoot"
