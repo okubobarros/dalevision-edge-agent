@@ -752,9 +752,7 @@ def capture_snapshot_if_possible(
     logger: logging.Logger,
     timeout_seconds: int = 5,
 ) -> dict[str, Optional[str]]:
-    cv2 = _try_import_cv2()
-    if cv2 is None:
-        logger.info("[EDGE] OpenCV não disponível; tentando fallback ffmpeg")
+    def _capture_with_ffmpeg_fallback() -> dict[str, Optional[str]]:
         ffmpeg = _ffmpeg_path()
         if not ffmpeg:
             logger.info("SNAPNO camera_id=%s snapshot skipped (ffmpeg not available)", camera_id)
@@ -769,6 +767,11 @@ def capture_snapshot_if_possible(
         if result is None:
             return {"snapshot_status": "error", "snapshot_local_path": None}
         return {"snapshot_status": "ok", "snapshot_local_path": result}
+
+    cv2 = _try_import_cv2()
+    if cv2 is None:
+        logger.info("[EDGE] OpenCV não disponível; tentando fallback ffmpeg")
+        return _capture_with_ffmpeg_fallback()
 
     cache_root_env = str(os.getenv("DALE_CACHE_DIR") or "").strip()
     snapshots_dir = (
@@ -791,8 +794,12 @@ def capture_snapshot_if_possible(
         ok, frame = cap.read()
         if not ok or frame is None:
             logger.info("SNAPERR camera_id=%s snapshot capture failed", camera_id)
-            return {"snapshot_status": "error", "snapshot_local_path": None}
-        cv2.imwrite(str(output_path), frame)
+            logger.info("[EDGE] OpenCV capture falhou; tentando fallback ffmpeg camera_id=%s", camera_id)
+            return _capture_with_ffmpeg_fallback()
+        if not cv2.imwrite(str(output_path), frame):
+            logger.info("SNAPERR camera_id=%s snapshot write failed", camera_id)
+            logger.info("[EDGE] OpenCV write falhou; tentando fallback ffmpeg camera_id=%s", camera_id)
+            return _capture_with_ffmpeg_fallback()
         logger.info("camera_id=%s snapshot captured path=%s", camera_id, output_path)
         return {"snapshot_status": "ok", "snapshot_local_path": str(output_path)}
     finally:

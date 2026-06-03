@@ -383,12 +383,18 @@ def build_setup_api_response(
         user = (query.get("user") or ["admin"])[0]
         password = (query.get("password") or ["admin"])[0]
         channel = int((query.get("channel") or ["1"])[0])
+        rtsp_url = str((query.get("rtsp_url") or [""])[0] or "").strip()
         cam_id = f"{ip.replace('.', '_')}_ch{channel}"
-        
-        rtsp_urls = [
-            f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=1",
-            f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=0",
-        ]
+
+        rtsp_urls = []
+        if rtsp_url:
+            rtsp_urls.append(rtsp_url)
+        rtsp_urls.extend(
+            [
+                f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=1",
+                f"rtsp://{user}:{password}@{ip}:554/cam/realmonitor?channel={channel}&subtype=0",
+            ]
+        )
         
         print(f"[SETUP_API] Tentando snapshot: {ip} (CH {channel})")
         try:

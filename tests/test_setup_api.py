@@ -54,6 +54,36 @@ def test_setup_api_test_stream_auto_falls_back_to_dvrip(monkeypatch):
     assert payload["attempts"][1]["protocol"] == "dvrip"
 
 
+def test_setup_api_snapshot_prefers_explicit_rtsp_url(monkeypatch):
+    captured: dict = {}
+
+    def fake_snapshot(camera_id: str, rtsp_urls: list[str]):
+        captured["camera_id"] = camera_id
+        captured["rtsp_urls"] = list(rtsp_urls)
+        return None
+
+    monkeypatch.setattr(
+        "dalevision_edge_agent.setup_api.stream_manager.get_snapshot_with_fallbacks",
+        fake_snapshot,
+    )
+
+    code, payload = build_setup_api_response(
+        path=(
+            "/onboarding/snapshot?"
+            "ip=192.168.15.4&user=admin&password=pass&channel=2&"
+            "rtsp_url=rtsp://admin:pass@192.168.15.4:554/cam/realmonitor?channel=2%26subtype=1%26unicast=true%26proto=Onvif"
+        ),
+        discovery_provider=lambda: [],
+    )
+
+    assert code == 200
+    assert payload["ok"] is False
+    assert captured["camera_id"] == "192_168_15_4_ch2"
+    assert captured["rtsp_urls"][0] == (
+        "rtsp://admin:pass@192.168.15.4:554/cam/realmonitor?channel=2&subtype=1&unicast=true&proto=Onvif"
+    )
+
+
 def test_setup_api_health_uses_installed_version_from_config(monkeypatch, tmp_path):
     config_path = tmp_path / "agent_config.json"
     expected_version = "latest-test-version"

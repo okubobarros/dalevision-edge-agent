@@ -158,6 +158,37 @@ class CamerasTests(unittest.TestCase):
         self.assertEqual("error", result.get("snapshot_status"))
         self.assertIsNone(result.get("snapshot_local_path"))
 
+    @patch("dalevision_edge_agent.cameras._capture_snapshot_ffmpeg")
+    @patch("dalevision_edge_agent.cameras._try_import_cv2")
+    @patch("dalevision_edge_agent.cameras._ffmpeg_path")
+    def test_snapshot_falls_back_to_ffmpeg_when_opencv_capture_fails(
+        self,
+        mock_ffmpeg_path: Mock,
+        mock_try_import: Mock,
+        mock_capture_ffmpeg: Mock,
+    ) -> None:
+        mock_ffmpeg_path.return_value = "ffmpeg"
+        mock_capture_ffmpeg.return_value = "C:/tmp/snapshot.jpg"
+
+        fake_cap = Mock()
+        fake_cap.read.return_value = (False, None)
+
+        fake_cv2 = Mock()
+        fake_cv2.VideoCapture.return_value = fake_cap
+        mock_try_import.return_value = fake_cv2
+
+        logger = Mock()
+        result = capture_snapshot_if_possible(
+            camera_id="cam-3",
+            rtsp_url="rtsp://user:pass@10.0.0.12:554/stream1",
+            logger=logger,
+        )
+
+        self.assertEqual("ok", result.get("snapshot_status"))
+        self.assertEqual("C:/tmp/snapshot.jpg", result.get("snapshot_local_path"))
+        mock_capture_ffmpeg.assert_called_once()
+        fake_cap.release.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
