@@ -15,9 +15,11 @@ class HeartbeatPayload:
     uptime_seconds: int
     cameras_connected: int
     inference_fps: float
+    avg_inference_fps: Optional[float] = None
+    enabled_indicators: Optional[list] = None
 
     def to_extra_data(self) -> dict:
-        return {
+        data: dict = {
             "device_key": self.device_key,
             "installed_version": self.installed_version,
             "update_channel": self.update_channel,
@@ -26,6 +28,11 @@ class HeartbeatPayload:
             "cameras_connected": self.cameras_connected,
             "inference_fps": self.inference_fps,
         }
+        if self.avg_inference_fps is not None:
+            data["avg_inference_fps"] = self.avg_inference_fps
+        if self.enabled_indicators is not None:
+            data["enabled_indicators"] = self.enabled_indicators
+        return data
 
 
 class HeartbeatClient:

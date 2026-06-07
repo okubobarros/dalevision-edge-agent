@@ -934,12 +934,28 @@ def build_camera_heartbeat_fields(
 ) -> dict[str, Any]:
     summary: list[dict[str, Any]] = []
     counts = {"online": 0, "degraded": 0, "offline": 0, "unknown": 0}
+    all_indicators: set[str] = set()
+    fps_values: list[float] = []
+
     for camera_id in sorted(states.keys()):
         state = states[camera_id]
         status = str(state.get("status") or "unknown")
         if status not in counts:
             status = "unknown"
         counts[status] += 1
+
+        indicators = state.get("indicators") or []
+        if isinstance(indicators, list):
+            all_indicators.update(str(ind) for ind in indicators if ind)
+
+        fps = state.get("fps")
+        try:
+            fps_float = float(fps) if fps is not None else None
+        except (TypeError, ValueError):
+            fps_float = None
+        if fps_float is not None:
+            fps_values.append(fps_float)
+
         summary.append(
             {
                 "camera_id": camera_id,
@@ -948,8 +964,12 @@ def build_camera_heartbeat_fields(
                 "lighting_score": state.get("lighting_score"),
                 "sharpness_score": state.get("sharpness_score"),
                 "camera_pose_quality": state.get("camera_pose_quality"),
+                "indicators": indicators,
+                "fps": fps_float,
             }
         )
+
+    avg_fps = sum(fps_values) / len(fps_values) if fps_values else None
 
     return {
         "cameras_total": len(summary),
@@ -958,4 +978,6 @@ def build_camera_heartbeat_fields(
         "cameras_offline": counts["offline"],
         "cameras_unknown": counts["unknown"],
         "cameras": summary,
+        "enabled_indicators": sorted(all_indicators),
+        "avg_inference_fps": round(avg_fps, 2) if avg_fps is not None else None,
     }

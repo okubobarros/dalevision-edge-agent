@@ -2222,7 +2222,9 @@ def main() -> int:
             status=current_agent_state.value if current_agent_state in (AgentState.ACTIVE, AgentState.DEGRADED) else AgentState.ACTIVE.value,
             uptime_seconds=max(0, int(time.time() - started_at)),
             cameras_connected=cameras_connected,
-            inference_fps=0.0,
+            inference_fps=camera_fields.get("avg_inference_fps") or 0.0,
+            avg_inference_fps=camera_fields.get("avg_inference_fps"),
+            enabled_indicators=camera_fields.get("enabled_indicators"),
         )
         ok, status, error = heartbeat_client.send(
             url=url,

@@ -258,12 +258,29 @@ class VisionWorker:
                 payload = self._build_payload(cam, state, metrics, state["bucket_start"], bucket_start)
                 self._log_bucket_summary(payload, state)
                 self._send_event(payload)
+                if now - state.get("last_calibration_ts", 0.0) >= self._CALIBRATION_INTERVAL_SECONDS:
+                    try:
+                        self._send_calibration_event(cam=cam, agg=state["agg"], ts=now)
+                        state["last_calibration_ts"] = now
+                    except Exception:
+                        self.logger.warning("[VISION] calibration event send failed", exc_info=True)
+                if now - state.get("last_heatmap_ts", 0.0) >= self._HEATMAP_INTERVAL_SECONDS:
+                    try:
+                        self._send_heatmap_event(cam=cam, state=state, ts=now)
+                        state["last_heatmap_ts"] = now
+                    except Exception:
+                        self.logger.warning("[VISION] heatmap event send failed", exc_info=True)
                 state["bucket_start"] = bucket_start
                 state["agg"] = self._fresh_agg()
             processed += 1
 
         if processed:
             self.logger.info("[VISION] tick processed=%s bucket_start=%s", processed, bucket_start)
+
+    _CALIBRATION_INTERVAL_SECONDS = 600
+    _HEATMAP_INTERVAL_SECONDS = 600
+    _HEATMAP_ROWS = 9
+    _HEATMAP_COLS = 16
 
     def _init_camera_state(self, role: str) -> dict:
         return {
@@ -279,6 +296,9 @@ class VisionWorker:
             "idle_start_ts": None,
             "queue_start_ts": None,
             "phone_start_ts": None,
+            "last_calibration_ts": 0.0,
+            "last_heatmap_ts": 0.0,
+            "heatmap_grid": [[0] * self._HEATMAP_COLS for _ in range(self._HEATMAP_ROWS)],
             "last_alert_ts": {},
             "roi_lines_count": 0,
         }
@@ -289,6 +309,8 @@ class VisionWorker:
             "frames_processed_for_detection": 0,
             "frames_with_detections": 0,
             "detections_sum": 0,
+            "confidence_sum": 0.0,
+            "confidence_samples": 0,
             "line_crossings_count": 0,
             "fila_sum": 0,
             "fila_max": 0,
@@ -338,6 +360,18 @@ class VisionWorker:
                     payload = self._build_payload(cam, state, metrics, state["bucket_start"], bucket_start)
                     self._log_bucket_summary(payload, state)
                     self._send_event(payload)
+                    if ts - state.get("last_calibration_ts", 0.0) >= self._CALIBRATION_INTERVAL_SECONDS:
+                        try:
+                            self._send_calibration_event(cam=cam, agg=state["agg"], ts=ts)
+                            state["last_calibration_ts"] = ts
+                        except Exception:
+                            self.logger.warning("[VISION] calibration event send failed", exc_info=True)
+                    if ts - state.get("last_heatmap_ts", 0.0) >= self._HEATMAP_INTERVAL_SECONDS:
+                        try:
+                            self._send_heatmap_event(cam=cam, state=state, ts=ts)
+                            state["last_heatmap_ts"] = ts
+                        except Exception:
+                            self.logger.warning("[VISION] heatmap event send failed", exc_info=True)
                     state["bucket_start"] = bucket_start
                     state["agg"] = self._fresh_agg()
         except Exception as exc:
@@ -964,20 +998,36 @@ class VisionWorker:
         active_room_tracks = set()
         if results and results.get("boxes"):
             for item in results["boxes"]:
-                if len(item) >= 6:
+                if len(item) >= 7:
+                    x1, y1, x2, y2, cls, track_id, box_conf = item
+                elif len(item) >= 6:
                     x1, y1, x2, y2, cls, track_id = item
+                    box_conf = None
                 else:
                     x1, y1, x2, y2, cls = item
                     track_id = None
+                    box_conf = None
                 is_person = cls == 0
                 is_phone = cls == self.cfg.phone_class_id
                 if not is_person and not is_phone:
                     continue
                 if is_person:
                     people_detections += 1
+                    if box_conf is not None:
+                        agg["confidence_sum"] += float(box_conf)
+                        agg["confidence_samples"] += 1
                 cx = int((x1 + x2) / 2)
                 foot_y = int(y2)
                 center_y = int((y1 + y2) / 2)
+                if is_person:
+                    try:
+                        fh, fw = frame.shape[:2]
+                        if fw > 0 and fh > 0:
+                            col = min(self._HEATMAP_COLS - 1, int(cx / fw * self._HEATMAP_COLS))
+                            row = min(self._HEATMAP_ROWS - 1, int(foot_y / fh * self._HEATMAP_ROWS))
+                            state["heatmap_grid"][row][col] += 1
+                    except Exception:
+                        pass
 
                 if role == "balcao":
                     if is_phone and self.cfg.phone_enabled:
@@ -1288,7 +1338,7 @@ class VisionWorker:
                 if not model_path:
                     model_path = "yolov8n.pt"
                 state["model"] = YOLO(model_path)
-            res = state["model"].track(frame, persist=True, verbose=False, conf=0.35, iou=0.45)[0]
+            res = state["model"].track(frame, persist=True, verbose=False, conf=0.35, iou=0.45, tracker="bytetrack.yaml")[0]
             if res.boxes is None:
                 return None
             boxes = res.boxes.xyxy.cpu().numpy().astype(int)
@@ -1296,10 +1346,14 @@ class VisionWorker:
             track_ids = None
             if getattr(res.boxes, "id", None) is not None:
                 track_ids = res.boxes.id.cpu().numpy().astype(int)
+            confs = None
+            if getattr(res.boxes, "conf", None) is not None:
+                confs = res.boxes.conf.cpu().numpy()
             items = []
             for idx, ((x1, y1, x2, y2), cls) in enumerate(zip(boxes, clss)):
                 track_id = int(track_ids[idx]) if track_ids is not None and idx < len(track_ids) else None
-                items.append([x1, y1, x2, y2, int(cls), track_id])
+                conf = float(confs[idx]) if confs is not None and idx < len(confs) else None
+                items.append([x1, y1, x2, y2, int(cls), track_id, conf])
             return {"boxes": items}
         except Exception as exc:
             self.logger.warning("[VISION] yolo failed: %s", exc)
@@ -1842,6 +1896,76 @@ class VisionWorker:
             metric_type="zone_dwell",
             confidence=payload.get("confidence", 1.0),
         )
+
+    def _send_calibration_event(self, *, cam: dict, agg: dict, ts: float) -> None:
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+        frames_processed = max(1, int(agg.get("frames_processed_for_detection") or 1))
+        frames_with_det = int(agg.get("frames_with_detections") or 0)
+        detection_rate = frames_with_det / frames_processed
+
+        conf_samples = int(agg.get("confidence_samples") or 0)
+        avg_conf = (agg.get("confidence_sum") or 0.0) / conf_samples if conf_samples > 0 else None
+
+        score = detection_rate * 0.6 + (avg_conf or 0.5) * 0.4
+
+        reason_codes = []
+        if detection_rate < 0.1:
+            reason_codes.append("low_detection_rate")
+        if avg_conf is not None and avg_conf < 0.45:
+            reason_codes.append("low_avg_confidence")
+        if not (cam.get("roi") or {}).get("zones"):
+            reason_codes.append("roi_missing")
+
+        event_name = "vision.calibration.v1"
+        receipt_id = _sha256(f"{event_name}|{self.store_id}|{camera_id}|{int(ts)}")
+        payload = {
+            "store_id": self.store_id,
+            "camera_id": camera_id,
+            "ts": _iso(ts),
+            "score": round(score, 4),
+            "detection_rate": round(detection_rate, 4),
+            "avg_confidence": round(avg_conf, 4) if avg_conf is not None else None,
+            "frames_processed": frames_processed,
+            "frames_with_detections": frames_with_det,
+            "reason_codes": reason_codes,
+            "recommended_action": "check_roi_and_camera_angle" if reason_codes else None,
+        }
+        envelope = {
+            "event_name": event_name,
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
+            "ts": payload["ts"],
+            "data": payload,
+        }
+        self._send_or_enqueue(envelope=envelope, context=f"{event_name}:{camera_id}")
+
+    def _send_heatmap_event(self, *, cam: dict, state: dict, ts: float) -> None:
+        camera_id = str(cam.get("camera_id") or cam.get("id") or "")
+        grid = state.get("heatmap_grid") or [[0] * self._HEATMAP_COLS for _ in range(self._HEATMAP_ROWS)]
+        total = sum(v for row in grid for v in row)
+        event_name = "vision.heatmap.v1"
+        receipt_id = _sha256(f"{event_name}|{self.store_id}|{camera_id}|{int(ts)}")
+        payload = {
+            "store_id": self.store_id,
+            "camera_id": camera_id,
+            "ts": _iso(ts),
+            "rows": self._HEATMAP_ROWS,
+            "cols": self._HEATMAP_COLS,
+            "grid": grid,
+            "total_detections": total,
+            "interval_seconds": self._HEATMAP_INTERVAL_SECONDS,
+        }
+        envelope = {
+            "event_name": event_name,
+            "source": "edge",
+            "receipt_id": receipt_id,
+            "idempotency_key": receipt_id,
+            "ts": payload["ts"],
+            "data": payload,
+        }
+        self._send_or_enqueue(envelope=envelope, context=f"{event_name}:{camera_id}")
+        state["heatmap_grid"] = [[0] * self._HEATMAP_COLS for _ in range(self._HEATMAP_ROWS)]
 
     def _track_checkout_cycle(
         self,
