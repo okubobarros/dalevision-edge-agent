@@ -312,6 +312,13 @@ if (-not [string]::IsNullOrWhiteSpace($CloudBaseUrl)) {
   Upsert-EnvValue -EnvPath $envTarget -Key "CLOUD_BASE_URL" -Value $CloudBaseUrl.Trim()
 }
 
+# Garantir que VISION_ENABLED=1 esteja presente — sem isso o agente sobe mas não gera métricas.
+$existingVisionEnabled = Get-EnvValue -EnvPath $envTarget -Key "VISION_ENABLED"
+if ([string]::IsNullOrWhiteSpace($existingVisionEnabled) -or $existingVisionEnabled -eq "0") {
+  Upsert-EnvValue -EnvPath $envTarget -Key "VISION_ENABLED" -Value "1"
+  Write-Log "INSTALL004F vision_enabled_set"
+}
+
 if (-not [string]::IsNullOrWhiteSpace($tokenResolved) -and -not [string]::IsNullOrWhiteSpace($CloudBaseUrl)) {
   try {
     $deviceKey = ""

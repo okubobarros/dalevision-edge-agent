@@ -1773,6 +1773,14 @@ def main() -> int:
         )
         print(msg)
         logger.info(msg)
+    else:
+        warn_msg = (
+            "[VISION] DESABILITADO — nenhuma métrica de visão será gerada. "
+            "Para ativar, defina VISION_ENABLED=1 no arquivo .env "
+            f"({os.getenv('DALE_ENV_PATH', '%APPDATA%\\DaleVision\\.env')})"
+        )
+        print(warn_msg)
+        logger.warning(warn_msg)
     try:
         vision = VisionWorker(
             cloud_base_url=settings.cloud_base_url,

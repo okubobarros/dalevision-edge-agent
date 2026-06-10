@@ -153,12 +153,14 @@ def build_setup_api_response(
         }
 
     if route == "/health":
+        vision_enabled = os.getenv("VISION_ENABLED", "0") == "1"
         return 200, {
             "ok": True,
             "service": "edge_setup_api",
             "status": "online",
             "version": resolve_agent_version(),
             "ips": get_local_ips(),
+            "vision_enabled": vision_enabled,
             "capabilities": {
                 "onboarding_blueprint": True,
                 "onboarding_readiness": True,
@@ -166,6 +168,7 @@ def build_setup_api_response(
                 "streaming_hls": True,
                 "test_stream": True,
                 "dvrip_icsee": True,
+                "vision_worker": vision_enabled,
             },
         }
 
@@ -186,10 +189,12 @@ def build_setup_api_response(
 
     if route == "/onboarding/ping":
         # Ultra-lightweight endpoint for frontend polling
+        vision_enabled = os.getenv("VISION_ENABLED", "0") == "1"
         return 200, {
             "ok": True,
             "status": "online",
-            "timestamp": time.time()
+            "timestamp": time.time(),
+            "vision_enabled": vision_enabled,
         }
 
     if route == "/onboarding/readiness":
