@@ -28,6 +28,28 @@ function Assert-FileExists {
   }
 }
 
+function Assert-BinaryRunnable {
+  param(
+    [string]$Path
+  )
+
+  $stdoutPath = Join-Path $repoRoot "_release_exe_stdout.log"
+  $stderrPath = Join-Path $repoRoot "_release_exe_stderr.log"
+  Remove-Item -Force $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+  try {
+    $proc = Start-Process -FilePath $Path -ArgumentList "--help" -PassThru -Wait -NoNewWindow `
+      -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
+    if ($proc.ExitCode -ne 0) {
+      $stderr = if (Test-Path $stderrPath) { Get-Content -Raw $stderrPath } else { "" }
+      $stdout = if (Test-Path $stdoutPath) { Get-Content -Raw $stdoutPath } else { "" }
+      $detail = ($stderr + "`n" + $stdout).Trim()
+      throw "Executable sanity check failed with exit code $($proc.ExitCode). $detail"
+    }
+  } finally {
+    Remove-Item -Force $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+  }
+}
+
 function Ensure-Model {
   param(
     [string]$Path,
@@ -101,6 +123,7 @@ $requiredSources = @(
 foreach ($item in $requiredSources) {
   Assert-FileExists -Path $item.Path -Label $item.Label
 }
+Assert-BinaryRunnable -Path $distExe
 
 # 2) limpar release/win
 Remove-Item -Recurse -Force $releaseWin -ErrorAction SilentlyContinue

@@ -1,9 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_submodules
+
+
+repo_root = Path.cwd()
+src_root = repo_root / "src"
+
 
 a = Analysis(
     ['src\\run_agent.py'],
-    pathex=[],
+    pathex=[str(src_root)],
     binaries=[],
     datas=[
         ('scripts\\install-service.ps1', 'scripts'),
@@ -16,7 +24,7 @@ a = Analysis(
         ('scripts\\internal\\Start_DaleVision_Agent.bat', 'scripts\\internal'),
         ('release\\run_agent.cmd', '.'),
     ],
-    hiddenimports=[
+    hiddenimports=collect_submodules('dalevision_edge_agent') + [
         'lap',
         'charset_normalizer',
         'chardet',
